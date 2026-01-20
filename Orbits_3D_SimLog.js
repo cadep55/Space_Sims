@@ -40,6 +40,14 @@ const ui = {
   dvOut: $("dvOut"),
 };
 
+
+const planBtn = document.getElementById("planBtn"); // <- adjust id if different
+console.log("planBtn:", planBtn);
+
+planBtn?.addEventListener("click", () => {
+  console.log("Plan Maneuvers clicked ✅");
+});
+
 /** =========================
  *  Three.js Scene
  *  ========================= */
