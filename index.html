@@ -1,21 +1,131 @@
 <!doctype html>
-<html>
+<html lang="en">
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <title>Space Sims</title>
+  <title>Space Sims — 2D Spacecraft Transfer Orbits</title>
+
   <style>
-    body{font-family:system-ui,Arial;margin:40px;max-width:900px}
-    a{display:inline-block;margin:8px 0}
+    body {
+      font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif;
+      margin: 40px;
+      max-width: 900px;
+      line-height: 1.6;
+      color: #1a1a1a;
+    }
+
+    h1 {
+      margin-bottom: 0.2em;
+    }
+
+    .byline {
+      font-size: 0.9em;
+      color: #555;
+      margin-bottom: 1.5em;
+    }
+
+    .intro {
+      margin-bottom: 2em;
+      font-size: 1.05em;
+    }
+
+    h2 {
+      margin-top: 2em;
+    }
+
+    ul {
+      margin-left: 1.2em;
+    }
+
+    a {
+      color: #0a66c2;
+      text-decoration: none;
+    }
+
+    a:hover {
+      text-decoration: underline;
+    }
+
+    .footer {
+      margin-top: 3em;
+      font-size: 0.9em;
+      color: #555;
+    }
+
+    code {
+      background: #f3f3f3;
+      padding: 2px 5px;
+      border-radius: 4px;
+    }
   </style>
 </head>
 <body>
-  <h1>Space Sims</h1>
-  <p>Interactive orbital mechanics simulators (HTML/JS).</p>
+
+  <h1>Space Sims: 2D Spacecraft Transfer Orbits</h1>
+  <div class="byline">by Cade Patterson</div>
+
+  <div class="intro">
+    <p>
+      Hello and welcome! I am an extremely visual learner, so for 2026 I’m endeavoring to
+      combine the space systems engineering knowledge I’m developing at Johns Hopkins
+      University with AI and applied mathematics to create a series of simple, interactive
+      mini-projects.
+    </p>
+
+    <p>
+      The goal of these models is to give students and space enthusiasts a fast, intuitive way
+      to visualize <strong>Hohmann transfers</strong> — both for single-body planetary rendezvous
+      and heliocentric interplanetary transfers.
+    </p>
+
+    <p>
+      These simulations are intentionally <strong>2D</strong> and currently do not consider
+      orbital inclination or plane changes. Expanding these models into higher-fidelity
+      representations while keeping them intuitive is a future goal.
+    </p>
+
+    <p>
+      Notes, equations, and reference parameters are primarily taken from
+      <em>Space Mission Engineering: The New SMAD</em> and
+      <a href="https://orbital-mechanics.space/orbital-maneuvers/hohmann-transfer.html" target="_blank">
+        orbital-mechanics.space
+      </a>.
+    </p>
+
+    <p>
+      Check out the simulations below, test the math, and feel free to reach out with ideas,
+      improvements, or bug fixes you’d like to see next.
+    </p>
+  </div>
+
+  <h2>Live Simulations</h2>
   <ul>
-    <li><a href="orbit_rendezvous_sim_v2_elliptic.html">Single-Body Rendezvous Simulator (Elliptic v2)</a></li>
-    <li><a href="orbit_interplan_v2_sim.html">Interplanetary Hohmann Transfer Simulator</a></li>
+    <li>
+      <a href="orbit_interplanetary_sim.html">
+        Interplanetary Hohmann Transfer Simulator (Heliocentric)
+      </a>
+    </li>
+    <li>
+      <a href="orbit_rendezvous_sim_v2_elliptic.html">
+        Single-Body Rendezvous Simulator (Elliptical Orbits)
+      </a>
+    </li>
   </ul>
+
+  <h2>Source Code</h2>
+  <p>
+    For those interested in exploring or contributing to the code, the models are hosted
+    publicly on GitHub:
+  </p>
+  <p>
+    <a href="https://github.com/cadep55/Space_Sims" target="_blank">
+      https://github.com/cadep55/Space_Sims
+    </a>
+  </p>
+
+  <div class="footer">
+    Built with vanilla HTML, CSS, and JavaScript. No frameworks — just physics, math, and curiosity.
+  </div>
+
 </body>
 </html>
-
