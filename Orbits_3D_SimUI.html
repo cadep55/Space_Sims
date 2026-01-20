@@ -1,0 +1,164 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Orbit Rendezvous Viewer (Target + Chaser)</title>
+  <style>
+    html, body { margin: 0; height: 100%; overflow: hidden; background: #070b12; }
+    #ui {
+      position: absolute; top: 12px; left: 12px; z-index: 2;
+      background: rgba(0,0,0,0.60); color: #fff;
+      padding: 10px 12px; border-radius: 12px;
+      font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif;
+      width: 390px;
+      max-height: calc(100vh - 24px);
+      overflow: auto;
+    }
+    #ui h3 { margin: 6px 0 8px; font-size: 14px; }
+    #ui label { display: block; font-size: 12px; opacity: 0.92; margin-top: 8px; }
+    #ui input[type="number"], #ui select { width: 100%; padding: 6px; border-radius: 8px; border: 0; }
+    #ui input[type="range"] { width: 100%; }
+    #ui .row { display: flex; gap: 8px; }
+    #ui .row > div { flex: 1; }
+    #ui .btnrow { display: flex; gap: 8px; margin-top: 8px; }
+    #ui button {
+      flex: 1; padding: 8px 10px; border-radius: 10px; border: 0;
+      background: rgba(255,255,255,0.12); color: #fff; cursor: pointer;
+    }
+    #ui button:hover { background: rgba(255,255,255,0.18); }
+    #ui .divider { height: 1px; background: rgba(255,255,255,0.14); margin: 10px 0; }
+    #ui pre {
+      background: rgba(255,255,255,0.08);
+      padding: 8px; border-radius: 10px;
+      font-size: 11px; line-height: 1.25;
+      white-space: pre-wrap;
+    }
+    .tiny { font-size: 11px; opacity: 0.8; }
+  </style>
+
+  <script async src="https://unpkg.com/es-module-shims@1.10.0/dist/es-module-shims.js"></script>
+  <script type="importmap">
+  {
+    "imports": {
+      "three": "https://unpkg.com/three@0.161.0/build/three.module.js",
+      "three/addons/": "https://unpkg.com/three@0.161.0/examples/jsm/"
+    }
+  }
+  </script>
+</head>
+<body>
+  <div id="ui">
+    <div class="btnrow">
+      <button id="btnStart">Start</button>
+      <button id="btnPause">Pause</button>
+      <button id="btnReset">Reset</button>
+    </div>
+
+    <label>Simulation speed: <span id="spdVal">30</span>x</label>
+    <input id="speed" type="range" min="1" max="200" step="1" value="30" />
+
+    <div class="divider"></div>
+
+    <h3>Target (e.g., ISS / GEO satellite)</h3>
+    <label>Preset</label>
+    <select id="targetPreset">
+      <option value="ISS" selected>ISS (≈400 km, 51.6°)</option>
+      <option value="GEO">GEO (circular, 0°)</option>
+      <option value="SSO">SSO (≈600 km, 98°)</option>
+      <option value="MOLNIYA">Molniya (typical)</option>
+      <option value="CUSTOM">Custom</option>
+    </select>
+    <div class="row">
+      <div>
+        <label>Perigee alt (km)</label>
+        <input id="t_rp" type="number" value="400" />
+      </div>
+      <div>
+        <label>Apogee alt (km)</label>
+        <input id="t_ra" type="number" value="400" />
+      </div>
+    </div>
+    <div class="row">
+      <div>
+        <label>Inclination i (deg)</label>
+        <input id="t_i" type="number" value="51.6" />
+      </div>
+      <div>
+        <label>RAAN Ω (deg)</label>
+        <input id="t_O" type="number" value="0" />
+      </div>
+    </div>
+    <div class="row">
+      <div>
+        <label>ArgPeri ω (deg)</label>
+        <input id="t_w" type="number" value="0" />
+      </div>
+      <div>
+        <label>Phase ν0 (deg)</label>
+        <input id="t_nu" type="number" value="0" />
+      </div>
+    </div>
+
+    <div class="divider"></div>
+
+    <h3>Chaser (e.g., Dragon / servicing vehicle)</h3>
+    <label>Preset</label>
+    <select id="chaserPreset">
+      <option value="LEO200" selected>LEO 200 km (circular)</option>
+      <option value="DRAGON_TO_ISS">Dragon demo (lower LEO, same plane)</option>
+      <option value="GTO">GTO-ish (for GEO repair demo)</option>
+      <option value="CUSTOM">Custom</option>
+    </select>
+    <div class="row">
+      <div>
+        <label>Perigee alt (km)</label>
+        <input id="c_rp" type="number" value="200" />
+      </div>
+      <div>
+        <label>Apogee alt (km)</label>
+        <input id="c_ra" type="number" value="200" />
+      </div>
+    </div>
+    <div class="row">
+      <div>
+        <label>Inclination i (deg)</label>
+        <input id="c_i" type="number" value="51.6" />
+      </div>
+      <div>
+        <label>RAAN Ω (deg)</label>
+        <input id="c_O" type="number" value="0" />
+      </div>
+    </div>
+    <div class="row">
+      <div>
+        <label>ArgPeri ω (deg)</label>
+        <input id="c_w" type="number" value="0" />
+      </div>
+      <div>
+        <label>Phase ν0 (deg)</label>
+        <input id="c_nu" type="number" value="-40" />
+      </div>
+    </div>
+
+    <div class="divider"></div>
+
+    <h3>Sun / Beta angle</h3>
+    <label>Beta angle β (deg): <span id="betaVal">0</span></label>
+    <input id="beta" type="range" min="-90" max="90" step="1" value="0" />
+    <div class="tiny">β is Sun elevation above the orbit plane (visual/lighting aid).</div>
+
+    <div class="divider"></div>
+
+    <div class="btnrow">
+      <button id="btnApply">Apply Orbits</button>
+      <button id="btnPlan">Plan Maneuvers (ΔV)</button>
+    </div>
+
+    <h3>ΔV Output</h3>
+    <pre id="dvOut">Click “Plan Maneuvers (ΔV)” to compute.</pre>
+  </div>
+
+  <script type="module" src="main.js"></script>
+</body>
+</html>
