@@ -41,10 +41,10 @@ const ui = {
 };
 
 
-const planBtn = document.getElementById("planBtn"); // <- adjust id if different
-console.log("planBtn:", planBtn);
+const btnPlan = document.getElementById("btnPlan"); // <- adjust id if different
+console.log("btnPlan:", btnPlan);
 
-planBtn?.addEventListener("click", () => {
+btnPlan?.addEventListener("click", () => {
   console.log("Plan Maneuvers clicked ✅");
 });
 
