@@ -1,0 +1,701 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>2D Rendezvous Simulator v2 — Elliptical Orbits (Apses-to-Apses)</title>
+  <style>
+    :root { color-scheme: dark; }
+    body { margin:0; font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Arial; background:#0b0f16; color:#e7eefc; }
+    .wrap { display:grid; grid-template-columns: 420px 1fr; height:100vh; }
+    .panel { padding:14px; border-right:1px solid #1b2536; overflow:auto; }
+    h1 { font-size:16px; margin:0 0 10px; }
+    h2 { font-size:13px; margin:14px 0 8px; color:#cfe0ff; }
+    .row { display:grid; grid-template-columns: 1fr 1fr; gap:10px; margin-bottom:10px; }
+    label { font-size:12px; color:#b7c5e6; display:block; margin-bottom:4px; }
+    input, select, button { width:100%; box-sizing:border-box; padding:8px 10px; border-radius:10px; border:1px solid #22304a; background:#0f1624; color:#e7eefc; }
+    button { cursor:pointer; border:1px solid #2a3a5a; background:#16233a; }
+    button:hover { background:#1b2c49; }
+    .btnrow { display:grid; grid-template-columns: 1fr 1fr 1fr; gap:10px; margin:10px 0; }
+    .box { border:1px solid #22304a; border-radius:12px; padding:10px; background:#0f1624; margin-bottom:10px; }
+    .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace; font-size:12px; white-space:pre-wrap; }
+    .hint { font-size:12px; color:#b7c5e6; line-height:1.35; }
+    canvas { width:100%; height:100%; display:block; background: radial-gradient(1200px 800px at 60% 40%, #0f1a2c, #060910); }
+    .small { font-size:11px; color:#aab9dd; }
+  </style>
+</head>
+<body>
+<div class="wrap">
+  <div class="panel">
+    <h1>v2 — Elliptical Orbits + Vector Δv (Apses-to-Apses Transfer)</h1>
+
+    <div class="box">
+      <div class="row">
+        <div>
+          <label>Central body</label>
+          <select id="body">
+            <option value="earth">Earth</option>
+            <option value="mars">Mars</option>
+            <option value="venus">Venus</option>
+            <option value="moon">Moon</option>
+          </select>
+        </div>
+        <div>
+          <label>Time scale (sim sec / real sec)</label>
+          <input id="timeScale" type="number" value="200" step="10" min="1" />
+        </div>
+      </div>
+
+      <div class="row">
+        <div>
+          <label>Trace length (points)</label>
+          <input id="traceN" type="number" value="3000" step="100" min="200" />
+        </div>
+        <div>
+          <label>Stop after days</label>
+          <input id="maxDays" type="number" value="1" step="0.1" min="0.01" />
+        </div>
+      </div>
+
+      <div class="row">
+        <div>
+          <label>Spacecraft wet mass (kg)</label>
+          <input id="m0" type="number" value="500" step="10" min="1" />
+        </div>
+        <div>
+          <label>Isp (s) for prop estimate</label>
+          <input id="isp" type="number" value="220" step="1" min="1" />
+        </div>
+      </div>
+
+      <div class="btnrow">
+        <button id="btnStart">Start</button>
+        <button id="btnPause">Pause</button>
+        <button id="btnReset">Reset</button>
+      </div>
+
+      <div class="hint">
+        Model: 2D two-body Kepler propagation + impulsive burns. Transfer is constrained to
+        <b>apsis-to-apsis</b> (peri/apo) between the two ellipses.
+      </div>
+    </div>
+
+    <div class="box">
+      <h2>Start orbit (Spacecraft)</h2>
+      <div class="row">
+        <div>
+          <label>Periapsis altitude hp1 (km)</label>
+          <input id="hp1" type="number" value="300" step="10" min="0" />
+        </div>
+        <div>
+          <label>Apoapsis altitude ha1 (km)</label>
+          <input id="ha1" type="number" value="300" step="10" min="0" />
+        </div>
+      </div>
+      <div class="row">
+        <div>
+          <label>ω1 (deg) — periapsis direction</label>
+          <input id="w1" type="number" value="0" step="1" />
+        </div>
+        <div>
+          <label>Departure point on start orbit</label>
+          <select id="depApsis">
+            <option value="peri">Depart at periapsis</option>
+            <option value="apo">Depart at apoapsis</option>
+          </select>
+        </div>
+      </div>
+      <div class="small">In v2, the spacecraft starts at the chosen departure apsis at t=0 (burn happens immediately).</div>
+    </div>
+
+    <div class="box">
+      <h2>Target orbit (Rendezvous target)</h2>
+      <div class="row">
+        <div>
+          <label>Periapsis altitude hp2 (km)</label>
+          <input id="hp2" type="number" value="700" step="10" min="0" />
+        </div>
+        <div>
+          <label>Apoapsis altitude ha2 (km)</label>
+          <input id="ha2" type="number" value="700" step="10" min="0" />
+        </div>
+      </div>
+      <div class="row">
+        <div>
+          <label>ω2 (deg) — periapsis direction</label>
+          <input id="w2" type="number" value="0" step="1" />
+        </div>
+        <div>
+          <label>Arrival point on target orbit</label>
+          <select id="arrApsis">
+            <option value="peri">Arrive at periapsis</option>
+            <option value="apo">Arrive at apoapsis</option>
+          </select>
+        </div>
+      </div>
+      <div class="row">
+        <div>
+          <label>Target initial true anomaly f0 (deg)</label>
+          <input id="f2_0" type="number" value="40" step="1" />
+        </div>
+        <div>
+          <label>Auto-set target phase</label>
+          <button id="btnAutoPhase">Set f0 to rendezvous</button>
+        </div>
+      </div>
+      <div class="small">Tip: click “Set f0 to rendezvous” to eliminate miss distance at arrival.</div>
+    </div>
+
+    <div class="box">
+      <label>Outputs</label>
+      <div id="out" class="mono"></div>
+    </div>
+  </div>
+
+  <canvas id="c"></canvas>
+</div>
+
+<script>
+(() => {
+  // Constants
+  const G = 6.67430e-11;
+  const TAU = Math.PI * 2;
+
+  const bodies = {
+    earth: { name:"Earth", mass: 5.9722e24, radius: 6371e3 },
+    mars:  { name:"Mars",  mass: 6.4171e23, radius: 3389.5e3 },
+    venus: { name:"Venus", mass: 4.8675e24, radius: 6051.8e3 },
+    moon:  { name:"Moon",  mass: 7.342e22,  radius: 1737.4e3 },
+  };
+
+  // UI
+  const el = id => document.getElementById(id);
+  const canvas = el("c");
+  const ctx = canvas.getContext("2d");
+
+  const ui = {
+    body: el("body"),
+    timeScale: el("timeScale"),
+    traceN: el("traceN"),
+    maxDays: el("maxDays"),
+    m0: el("m0"),
+    isp: el("isp"),
+
+    hp1: el("hp1"),
+    ha1: el("ha1"),
+    w1: el("w1"),
+    depApsis: el("depApsis"),
+
+    hp2: el("hp2"),
+    ha2: el("ha2"),
+    w2: el("w2"),
+    arrApsis: el("arrApsis"),
+    f2_0: el("f2_0"),
+    btnAutoPhase: el("btnAutoPhase"),
+
+    out: el("out"),
+    start: el("btnStart"),
+    pause: el("btnPause"),
+    reset: el("btnReset"),
+  };
+
+  // Helpers
+  const deg2rad = d => d * Math.PI/180;
+  const rad2deg = r => r * 180/Math.PI;
+  const modTau = a => ((a % TAU) + TAU) % TAU;
+
+  function fmt(x, digits=3){
+    if (!isFinite(x)) return "—";
+    const abs = Math.abs(x);
+    if (abs !== 0 && (abs < 1e-3 || abs > 1e6)) return x.toExponential(3);
+    return x.toFixed(digits);
+  }
+
+  function solveKeplerE(M, e){
+    M = modTau(M);
+    let E = (e < 0.8) ? M : Math.PI;
+    for (let i=0;i<25;i++){
+      const f = E - e*Math.sin(E) - M;
+      const fp = 1 - e*Math.cos(E);
+      const dE = -f/fp;
+      E += dE;
+      if (Math.abs(dE) < 1e-12) break;
+    }
+    return E;
+  }
+
+  function trueToE(f, e){
+    const t = Math.tan(f/2);
+    const k = Math.sqrt((1 - e) / (1 + e));
+    return 2 * Math.atan2(k*t, 1);
+  }
+
+  function EToTrue(E, e){
+    const s = Math.sin(E/2), c = Math.cos(E/2);
+    const num = Math.sqrt(1+e)*s;
+    const den = Math.sqrt(1-e)*c;
+    return 2*Math.atan2(num, den);
+  }
+
+  function rot2(vx, vy, ang){
+    const c = Math.cos(ang), s = Math.sin(ang);
+    return { x: c*vx - s*vy, y: s*vx + c*vy };
+  }
+
+  function rocketPropUsed(m0, dv, isp){
+    const g0 = 9.80665;
+    const mf = m0 * Math.exp(-dv / (isp*g0));
+    return { mf, mprop: m0 - mf };
+  }
+
+  // Orbital element builder from apses
+  function orbitFromApses(R, hp_km, ha_km, omega_deg, f0_deg){
+    const rp = R + hp_km*1e3;
+    const ra = R + ha_km*1e3;
+    const a = (rp + ra) / 2;
+    const e = (ra - rp) / (ra + rp);
+    const p = a * (1 - e*e);
+    const omega = deg2rad(omega_deg);
+    const f0 = deg2rad(f0_deg);
+    const E0 = trueToE(f0, e);
+    const M0 = modTau(E0 - e*Math.sin(E0));
+    return { rp, ra, a, e, p, omega, f0, M0 };
+  }
+
+  // Propagate orbit to time t
+  // FIX: keep position as x,y and velocity as vx,vy (no key overwrite)
+  function propagate(orb, mu, t){
+    const n = Math.sqrt(mu / (orb.a**3));
+    const M = orb.M0 + n*t;
+    const E = solveKeplerE(M, orb.e);
+    const f = EToTrue(E, orb.e);
+    const r = orb.a * (1 - orb.e*Math.cos(E));
+
+    const xp = r*Math.cos(f);
+    const yp = r*Math.sin(f);
+
+    const fac = Math.sqrt(mu / orb.p);
+    const vxp = -fac*Math.sin(f);
+    const vyp =  fac*(orb.e + Math.cos(f));
+
+    const pos = rot2(xp, yp, orb.omega);
+    const vel = rot2(vxp, vyp, orb.omega);
+
+    const theta = Math.atan2(pos.y, pos.x);
+
+    return { x: pos.x, y: pos.y, vx: vel.x, vy: vel.y, r, f, E, M, theta };
+  }
+
+  // Build a transfer ellipse between radii rD and rA, half-period transfer,
+  // aligned so that at t=0 it starts at the departure radius direction.
+  function buildTransfer(mu, rD, rA, depDirAngle, depIsPeri){
+    const a = (rD + rA) / 2;
+    const e = Math.abs(rA - rD) / (rA + rD);
+    const p = a * (1 - e*e);
+    const n = Math.sqrt(mu / (a**3));
+    const tof = Math.PI / n;
+
+    const f_dep = depIsPeri ? 0 : Math.PI;
+    const omega = depDirAngle - f_dep;
+
+    const E0 = trueToE(f_dep, e);
+    const M0 = modTau(E0 - e*Math.sin(E0));
+
+    return { a, e, p, omega, M0, tof, f_dep, n };
+  }
+
+  // State
+  let state = null;
+  let running = false;
+  let lastTS = 0;
+
+  function resize(){
+    const dpr = window.devicePixelRatio || 1;
+    canvas.width = Math.floor(canvas.clientWidth * dpr);
+    canvas.height = Math.floor(canvas.clientHeight * dpr);
+    ctx.setTransform(dpr,0,0,dpr,0,0);
+  }
+  window.addEventListener("resize", resize);
+
+  function recompute(){
+    const body = bodies[ui.body.value];
+    const mu = G * body.mass;
+    const gSurf = mu / (body.radius**2);
+
+    const start = orbitFromApses(
+      body.radius,
+      Number(ui.hp1.value),
+      Number(ui.ha1.value),
+      Number(ui.w1.value),
+      0
+    );
+
+    const target = orbitFromApses(
+      body.radius,
+      Number(ui.hp2.value),
+      Number(ui.ha2.value),
+      Number(ui.w2.value),
+      Number(ui.f2_0.value)
+    );
+
+    const depIsPeri = (ui.depApsis.value === "peri");
+    const arrIsPeri = (ui.arrApsis.value === "peri");
+
+    const f_dep_start = depIsPeri ? 0 : Math.PI;
+    const f_arr_target = arrIsPeri ? 0 : Math.PI;
+
+    // Spacecraft starts at departure apsis at t=0
+    {
+      const E0 = trueToE(f_dep_start, start.e);
+      start.M0 = modTau(E0 - start.e*Math.sin(E0));
+      start.f0 = f_dep_start;
+    }
+
+    const sc0 = propagate(start, mu, 0);
+    const depDirAngle = sc0.theta;
+
+    const rD = depIsPeri ? start.rp : start.ra;
+    const rA = arrIsPeri ? target.rp : target.ra;
+
+    const transferDepIsPeri = (rD <= rA);
+    const transfer = buildTransfer(mu, rD, rA, depDirAngle, transferDepIsPeri);
+    const tof = transfer.tof;
+
+    // Arrival point on transfer (defines where spacecraft will be at t=tof)
+    const trArr = propagate(transfer, mu, tof);
+    const thetaArr = trArr.theta;
+
+    // --- (Optional) You can align target omega to match transfer arrival apsis if desired.
+    // We leave ω2 as user-controlled for now, but the spacecraft will be placed on target orbit
+    // such that at t=tof it is at the chosen target apsis (f_arr_target). That can introduce
+    // a discontinuity if ω2 doesn't line up with thetaArr; trace-break logic below prevents X-lines.
+
+    // Force spacecraft-on-target M0 so that at t=tof it is at f_arr_target
+    const n_target = Math.sqrt(mu / (target.a**3));
+    const targetArrivalE = trueToE(f_arr_target, target.e);
+    const targetArrivalM = modTau(targetArrivalE - target.e*Math.sin(targetArrivalE));
+    const scTargetM0 = modTau(targetArrivalM - n_target*tof);
+
+    // Δv using velocity vectors
+    const tr0 = propagate(transfer, mu, 0);
+
+    const dv1 = Math.hypot(tr0.vx - sc0.vx, tr0.vy - sc0.vy);
+
+    const scOnTarget = { ...target, M0: scTargetM0 };
+    const scTargetAtArr = propagate(scOnTarget, mu, tof);
+
+    const dv2 = Math.hypot(scTargetAtArr.vx - trArr.vx, scTargetAtArr.vy - trArr.vy);
+
+    const dvTot = dv1 + dv2;
+
+    // Prop estimate
+    const m0 = Math.max(1, Number(ui.m0.value));
+    const isp = Math.max(1, Number(ui.isp.value));
+    const b1 = rocketPropUsed(m0, dv1, isp);
+    const b2 = rocketPropUsed(b1.mf, dv2, isp);
+
+    // Required target initial f0 for rendezvous at arrival point (f_arr_target) at t=tof
+    const M_arr = targetArrivalM;
+    const M0_req = modTau(M_arr - n_target*tof);
+    const E0_req = solveKeplerE(M0_req, target.e);
+    const f0_req = modTau(EToTrue(E0_req, target.e));
+
+    const tg0 = propagate(target, mu, 0);
+    const phase0 = modTau(tg0.theta - sc0.theta);
+
+    const tgAtArr = propagate(target, mu, tof);
+    const miss = Math.hypot(tgAtArr.x - trArr.x, tgAtArr.y - trArr.y);
+
+    const maxDays = Math.max(0.01, Number(ui.maxDays.value));
+    const stopAfterSec = maxDays * 86400;
+
+    state = {
+      body, mu, gSurf,
+      start, target, transfer,
+      depIsPeri, arrIsPeri,
+      rD, rA,
+      tof,
+      dv1, dv2, dvTot,
+      phase0,
+      f0_req,
+      miss,
+      scTargetM0,
+      // sim controls
+      timeScale: Math.max(1, Number(ui.timeScale.value)),
+      traceMax: Math.max(200, Math.floor(Number(ui.traceN.value))),
+      maxDays,
+      stopAfterSec,
+      // runtime
+      t: 0,
+      trace: [],
+      // propulsion
+      m0, isp, mf: b2.mf, propTot: (m0 - b2.mf),
+      // for discontinuity threshold
+      jumpRef: Math.max(start.ra, target.ra, transfer.a*(1+transfer.e)),
+    };
+
+    renderOutputs();
+  }
+
+  function renderOutputs(){
+    if (!state) return;
+    const km = x => x/1e3;
+
+    const start = state.start;
+    const target = state.target;
+    const transfer = state.transfer;
+
+    const nStart = Math.sqrt(state.mu / (start.a**3));
+    const nTarget = Math.sqrt(state.mu / (target.a**3));
+
+    ui.out.textContent =
+`Central body: ${state.body.name}
+μ = GM (m^3/s^2): ${fmt(state.mu,0)}
+Surface gravity (m/s^2): ${fmt(state.gSurf,3)}
+
+Start orbit:
+  rp (km): ${fmt(km(start.rp),1)}   ra (km): ${fmt(km(start.ra),1)}
+  a (km):  ${fmt(km(start.a),1)}    e: ${fmt(start.e,6)}
+  ω1 (deg): ${fmt(rad2deg(modTau(start.omega)),2)}
+
+Target orbit:
+  rp (km): ${fmt(km(target.rp),1)}  ra (km): ${fmt(km(target.ra),1)}
+  a (km):  ${fmt(km(target.a),1)}   e: ${fmt(target.e,6)}
+  ω2 (deg): ${fmt(rad2deg(modTau(target.omega)),2)}
+  target f0 (deg): ${fmt(rad2deg(modTau(target.f0)),2)}
+
+Transfer (apsis-to-apsis):
+  r_depart (km): ${fmt(km(state.rD),1)}
+  r_arrive (km): ${fmt(km(state.rA),1)}
+  aT (km): ${fmt(km(transfer.a),1)}   eT: ${fmt(transfer.e,6)}
+  TOF (s): ${fmt(state.tof,2)}   (${fmt(state.tof/60,2)} min)
+
+Δv (vector):
+  Δv1 (m/s): ${fmt(state.dv1,3)}
+  Δv2 (m/s): ${fmt(state.dv2,3)}
+  Total (m/s): ${fmt(state.dvTot,3)}
+
+Phasing:
+  initial inertial phase (deg): ${fmt(rad2deg(state.phase0),2)}
+  required target f0 for rendezvous (deg): ${fmt(rad2deg(state.f0_req),2)}
+  miss distance at arrival with current f0 (km): ${fmt(state.miss/1000,3)}
+
+Stop:
+  stop after (days): ${fmt(state.maxDays,3)}   (${fmt(state.stopAfterSec,2)} s)
+
+Prop estimate (Isp=${fmt(state.isp,1)} s, m0=${fmt(state.m0,1)} kg):
+  prop used (kg): ${fmt(state.propTot,3)}
+  final mass (kg): ${fmt(state.mf,3)}
+
+Mean motions:
+  n_start (deg/s): ${fmt(rad2deg(nStart),6)}
+  n_target (deg/s): ${fmt(rad2deg(nTarget),6)}
+`;
+  }
+
+  function spacecraftState(t){
+    if (t < state.tof){
+      return propagate(state.transfer, state.mu, t);
+    }
+    const scOnTarget = { ...state.target, M0: state.scTargetM0 };
+    return propagate(scOnTarget, state.mu, t);
+  }
+
+  function targetState(t){
+    return propagate(state.target, state.mu, t);
+  }
+
+  // Drawing helpers
+  let screen = { cx:0, cy:0, scale:1 };
+
+  function toScreen(x, y){
+    return { x: screen.cx + x*screen.scale, y: screen.cy - y*screen.scale };
+  }
+
+  function resizeAndClear(){
+    const W = canvas.clientWidth;
+    const H = canvas.clientHeight;
+    ctx.clearRect(0,0,W,H);
+    screen.cx = W/2;
+    screen.cy = H/2;
+  }
+
+  function drawOrbitCurve(orb, mu, color, lineW=1){
+    const steps = 360;
+    ctx.beginPath();
+    for (let i=0;i<=steps;i++){
+      const E = (i/steps)*TAU;
+      const r = orb.a * (1 - orb.e*Math.cos(E));
+      const f = EToTrue(E, orb.e);
+      const xp = r*Math.cos(f);
+      const yp = r*Math.sin(f);
+      const p = rot2(xp, yp, orb.omega);
+      const s = toScreen(p.x, p.y);
+      if (i===0) ctx.moveTo(s.x, s.y);
+      else ctx.lineTo(s.x, s.y);
+    }
+    ctx.strokeStyle = color;
+    ctx.lineWidth = lineW;
+    ctx.stroke();
+  }
+
+  function draw(){
+    if (!state) return;
+    const W = canvas.clientWidth;
+    const H = canvas.clientHeight;
+    resizeAndClear();
+
+    const maxR = Math.max(state.start.ra, state.target.ra, state.transfer.a*(1+state.transfer.e)) * 1.08;
+    screen.scale = 0.45 * Math.min(W,H) / maxR;
+
+    // central body
+    const bodyR = state.body.radius * screen.scale;
+    ctx.beginPath();
+    ctx.arc(screen.cx, screen.cy, Math.max(4, bodyR), 0, TAU);
+    ctx.fillStyle = "#121a2b";
+    ctx.fill();
+    ctx.strokeStyle = "#2a3a5a";
+    ctx.lineWidth = 1;
+    ctx.stroke();
+
+    // Orbits
+    drawOrbitCurve(state.start, state.mu, "#2b4a7a", 1);
+    drawOrbitCurve(state.target, state.mu, "#2b7a4a", 1);
+    drawOrbitCurve(state.transfer, state.mu, "#6b4aa6", 1);
+
+    // Trace (with breaks)
+    if (state.trace.length > 1){
+      ctx.beginPath();
+      let started = false;
+      for (let i=0;i<state.trace.length;i++){
+        const pt = state.trace[i];
+        if (pt === null){ started = false; continue; }
+        const p = toScreen(pt.x, pt.y);
+        if (!started){ ctx.moveTo(p.x, p.y); started = true; }
+        else ctx.lineTo(p.x, p.y);
+      }
+      ctx.strokeStyle = "rgba(240,240,255,0.45)";
+      ctx.lineWidth = 1;
+      ctx.stroke();
+    }
+
+    // Markers: departure and transfer arrival
+    const sc0 = spacecraftState(0);
+    const dep = toScreen(sc0.x, sc0.y);
+    ctx.beginPath();
+    ctx.arc(dep.x, dep.y, 4, 0, TAU);
+    ctx.fillStyle = "#ffd166";
+    ctx.fill();
+
+    const arr = propagate(state.transfer, state.mu, state.tof);
+    const ar = toScreen(arr.x, arr.y);
+    ctx.beginPath();
+    ctx.arc(ar.x, ar.y, 4, 0, TAU);
+    ctx.fillStyle = "#ff6b6b";
+    ctx.fill();
+
+    // Dots: spacecraft and target
+    const sc = spacecraftState(state.t);
+    const tg = targetState(state.t);
+
+    const sp = toScreen(sc.x, sc.y);
+    ctx.beginPath();
+    ctx.arc(sp.x, sp.y, 5, 0, TAU);
+    ctx.fillStyle = "#e9e9ff";
+    ctx.fill();
+
+    const tp = toScreen(tg.x, tg.y);
+    ctx.beginPath();
+    ctx.arc(tp.x, tp.y, 5, 0, TAU);
+    ctx.fillStyle = "#38d47a";
+    ctx.fill();
+
+    // HUD
+    ctx.fillStyle = "rgba(231,238,252,0.9)";
+    ctx.font = "12px ui-monospace, Menlo, Consolas, monospace";
+    const mode = (state.t < state.tof) ? "Transfer" : "On target orbit";
+    const phaseNow = modTau(tg.theta - sc.theta);
+    ctx.fillText(`t=${fmt(state.t,2)} s | ${mode}`, 14, 18);
+    ctx.fillText(`phase(target-sc)=${fmt(rad2deg(phaseNow),2)} deg`, 14, 34);
+    ctx.fillText(`t_days=${fmt(state.t/86400,3)} / ${fmt(state.maxDays,3)} days`, 14, 50);
+  }
+
+  function tick(ts){
+    if (!state) return;
+    if (!lastTS) lastTS = ts;
+    const dtReal = (ts - lastTS)/1000;
+    lastTS = ts;
+
+    if (running){
+      const dtSim = dtReal * state.timeScale;
+      state.t += dtSim;
+
+      const sc = spacecraftState(state.t);
+
+      // Trace point (break on big jumps)
+      const last = state.trace.length ? state.trace[state.trace.length - 1] : null;
+      if (last && last !== null){
+        const dist = Math.hypot(sc.x - last.x, sc.y - last.y);
+        const jumpThresh = 0.2 * state.jumpRef;
+        if (dist > jumpThresh) state.trace.push(null);
+      }
+      state.trace.push({ x: sc.x, y: sc.y });
+      while (state.trace.length > state.traceMax) state.trace.shift();
+
+      // Stop after N days
+      if (state.t >= state.stopAfterSec) running = false;
+    }
+
+    draw();
+    requestAnimationFrame(tick);
+  }
+
+  // Auto-phase button
+  ui.btnAutoPhase.addEventListener("click", () => {
+    if (!state) recompute();
+    ui.f2_0.value = fmt(rad2deg(state.f0_req), 2);
+    const wasRunning = running;
+    running = false;
+    recompute();
+    state.t = 0;
+    state.trace = [];
+    lastTS = 0;
+    running = wasRunning;
+  });
+
+  ui.start.addEventListener("click", () => { running = true; });
+  ui.pause.addEventListener("click", () => { running = false; });
+  ui.reset.addEventListener("click", () => {
+    running = false;
+    recompute();
+    state.t = 0;
+    state.trace = [];
+    lastTS = 0;
+  });
+
+  // Recompute on change
+  [
+    "body","timeScale","traceN","maxDays","m0","isp",
+    "hp1","ha1","w1","depApsis",
+    "hp2","ha2","w2","arrApsis","f2_0"
+  ].forEach(id=>{
+    ui[id].addEventListener("change", () => {
+      const wasRunning = running;
+      running = false;
+      recompute();
+      state.t = 0;
+      state.trace = [];
+      lastTS = 0;
+      running = wasRunning;
+    });
+  });
+
+  // Init
+  resize();
+  recompute();
+  requestAnimationFrame(tick);
+})();
+</script>
+</body>
+</html>
+

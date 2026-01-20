@@ -1,0 +1,519 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>2D Hohmann Rendezvous Simulator (Single Central Body)</title>
+  <style>
+    :root { color-scheme: dark; }
+    body { margin: 0; font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Arial; background:#0b0f16; color:#e7eefc; }
+    .wrap { display: grid; grid-template-columns: 360px 1fr; height: 100vh; }
+    .panel { padding: 14px; border-right: 1px solid #1b2536; overflow:auto; }
+    h1 { font-size: 16px; margin: 0 0 10px; }
+    .row { display:grid; grid-template-columns: 1fr 1fr; gap:10px; margin-bottom:10px; }
+    label { font-size: 12px; color:#b7c5e6; display:block; margin-bottom:4px; }
+    input, select, button { width: 100%; box-sizing:border-box; padding: 8px 10px; border-radius: 10px; border:1px solid #22304a; background:#0f1624; color:#e7eefc; }
+    input[type="range"] { padding: 0; }
+    button { cursor:pointer; border:1px solid #2a3a5a; background:#16233a; }
+    button:hover { background:#1b2c49; }
+    .btnrow { display:grid; grid-template-columns: 1fr 1fr 1fr; gap:10px; margin: 10px 0; }
+    .box { border:1px solid #22304a; border-radius: 12px; padding: 10px; background:#0f1624; margin-bottom:10px; }
+    .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace; font-size: 12px; white-space: pre-wrap; }
+    .hint { font-size: 12px; color:#b7c5e6; line-height:1.35; }
+    canvas { width: 100%; height: 100%; display:block; background: radial-gradient(1200px 800px at 60% 40%, #0f1a2c, #060910); }
+  </style>
+</head>
+<body>
+<div class="wrap">
+  <div class="panel">
+    <h1>Single-Body 2D Orbit Rendezvous (Hohmann)</h1>
+
+    <div class="box">
+      <div class="row">
+        <div>
+          <label>Central body</label>
+          <select id="body">
+            <option value="earth">Earth</option>
+            <option value="mars">Mars</option>
+            <option value="venus">Venus</option>
+            <option value="moon">Moon</option>
+          </select>
+        </div>
+        <div>
+          <label>Time scale (sim seconds / real second)</label>
+          <input id="timeScale" type="number" value="200" step="10" min="1" />
+        </div>
+      </div>
+
+      <div class="row">
+        <div>
+          <label>Start orbit altitude (km)</label>
+          <input id="alt1" type="number" value="300" min="0" step="10" />
+        </div>
+        <div>
+          <label>Target orbit altitude (km)</label>
+          <input id="alt2" type="number" value="700" min="0" step="10" />
+        </div>
+      </div>
+
+      <div class="row">
+        <div>
+          <label>Initial phase angle (deg)</label>
+          <input id="phase0" type="number" value="40" step="1" />
+        </div>
+        <div>
+          <label>Trace length (points)</label>
+          <input id="traceN" type="number" value="2500" step="100" min="100" />
+        </div>
+      </div>
+
+      <div class="row">
+        <div>
+          <label>Spacecraft wet mass (kg)</label>
+          <input id="m0" type="number" value="500" step="10" min="1" />
+        </div>
+        <div>
+          <label>Isp (s) for prop estimate</label>
+          <input id="isp" type="number" value="220" step="1" min="1" />
+        </div>
+      </div>
+
+      <div class="btnrow">
+        <button id="btnStart">Start</button>
+        <button id="btnPause">Pause</button>
+        <button id="btnReset">Reset</button>
+      </div>
+
+      <div class="hint">
+        Assumptions: 2D, coplanar, circular start/target orbits, impulsive burns, no J2/drag/3-body effects.
+        Spacecraft begins at true anomaly 0°. Phase angle = target’s initial angle relative to spacecraft.
+      </div>
+    </div>
+
+    <div class="box">
+      <label>Outputs</label>
+      <div id="out" class="mono"></div>
+    </div>
+
+    <div class="box">
+      <label>Notes</label>
+      <div class="hint">
+        • “Required phase angle” is the starting angle the target should have (ahead/behind) so both meet at arrival. <br/>
+        • After transfer, the spacecraft continues on the target circular orbit.
+      </div>
+    </div>
+  </div>
+
+  <canvas id="c"></canvas>
+</div>
+
+<script>
+(() => {
+  // ---- Constants ----
+  const G = 6.67430e-11; // m^3 kg^-1 s^-2
+
+  // Masses and mean radii (SI). Mu computed from G*M (good enough for this sim).
+  const bodies = {
+    earth: { name:"Earth", mass: 5.9722e24, radius: 6371e3 },
+    mars:  { name:"Mars",  mass: 6.4171e23, radius: 3389.5e3 },
+    venus: { name:"Venus", mass: 4.8675e24, radius: 6051.8e3 },
+    moon:  { name:"Moon",  mass: 7.342e22,  radius: 1737.4e3 },
+  };
+
+  // ---- UI ----
+  const el = id => document.getElementById(id);
+  const canvas = el("c");
+  const ctx = canvas.getContext("2d");
+
+  const ui = {
+    body: el("body"),
+    alt1: el("alt1"),
+    alt2: el("alt2"),
+    phase0: el("phase0"),
+    timeScale: el("timeScale"),
+    traceN: el("traceN"),
+    m0: el("m0"),
+    isp: el("isp"),
+    out: el("out"),
+    start: el("btnStart"),
+    pause: el("btnPause"),
+    reset: el("btnReset"),
+  };
+
+  // ---- Math helpers ----
+  const TAU = Math.PI * 2;
+  const clamp = (x,a,b)=>Math.min(b,Math.max(a,x));
+  const modTau = (a)=>((a%TAU)+TAU)%TAU;
+  const deg2rad = d => d * Math.PI/180;
+  const rad2deg = r => r * 180/Math.PI;
+
+  function solveKepler_E(M, e) {
+    // Newton-Raphson for E - e sinE = M
+    M = ((M % TAU) + TAU) % TAU;
+    let E = (e < 0.8) ? M : Math.PI;
+    for (let i=0;i<20;i++){
+      const f = E - e*Math.sin(E) - M;
+      const fp = 1 - e*Math.cos(E);
+      const dE = -f/fp;
+      E += dE;
+      if (Math.abs(dE) < 1e-10) break;
+    }
+    return E;
+  }
+
+  function E_to_trueAnomaly(E, e){
+    const s = Math.sin(E/2), c = Math.cos(E/2);
+    const num = Math.sqrt(1+e)*s;
+    const den = Math.sqrt(1-e)*c;
+    return 2*Math.atan2(num, den);
+  }
+
+  function fmt(x, digits=3){
+    if (!isFinite(x)) return "—";
+    const abs = Math.abs(x);
+    if (abs !== 0 && (abs < 1e-3 || abs > 1e6)) return x.toExponential(3);
+    return x.toFixed(digits);
+  }
+
+  function rocketPropUsed(m0, dv, isp){
+    // single burn equivalent prop for dv (kg)
+    const g0 = 9.80665;
+    const mf = m0 * Math.exp(-dv / (isp*g0));
+    return { mf, mprop: m0 - mf };
+  }
+
+  // ---- Simulation state ----
+  let running = false;
+  let lastT = 0;
+
+  let state = null;
+
+  function resize(){
+    const dpr = window.devicePixelRatio || 1;
+    canvas.width = Math.floor(canvas.clientWidth * dpr);
+    canvas.height = Math.floor(canvas.clientHeight * dpr);
+    ctx.setTransform(dpr,0,0,dpr,0,0);
+  }
+  window.addEventListener("resize", resize);
+
+  function recompute(){
+    const bodyKey = ui.body.value;
+    const body = bodies[bodyKey];
+
+    const mu = G * body.mass;                 // m^3/s^2
+    const gSurf = mu / (body.radius**2);      // m/s^2
+
+    const r1 = body.radius + (Number(ui.alt1.value) * 1e3);
+    const r2 = body.radius + (Number(ui.alt2.value) * 1e3);
+
+    const phase0 = deg2rad(Number(ui.phase0.value)); // target relative to spacecraft (spacecraft at 0)
+    const timeScale = Number(ui.timeScale.value);
+    const traceMax = Math.max(200, Math.floor(Number(ui.traceN.value)));
+
+    const m0 = Math.max(1, Number(ui.m0.value));
+    const isp = Math.max(1, Number(ui.isp.value));
+
+    // Hohmann parameters (circular to circular)
+    const aT = (r1 + r2) / 2;
+    const e = Math.abs(r2 - r1) / (r1 + r2);
+    const n1 = Math.sqrt(mu / (r1**3));
+    const n2 = Math.sqrt(mu / (r2**3));
+    const nT = Math.sqrt(mu / (aT**3));
+    const tof = Math.PI / nT; // half period of transfer ellipse
+
+    // Burn magnitudes
+    const v1 = Math.sqrt(mu / r1);
+    const v2 = Math.sqrt(mu / r2);
+    const vPeri = Math.sqrt(mu * (2/r1 - 1/aT));
+    const vApo  = Math.sqrt(mu * (2/r2 - 1/aT));
+    // Works for both raising/lowering if you treat peri/apo at the radii accordingly:
+    // For r1<r2, burn1 at peri (r1) uses vPeri; burn2 at apo (r2) uses vApo.
+    // For r1>r2, burn1 at apo (r1) uses vApo_at_r1? Our formulas above label vPeri at r1 and vApo at r2,
+    // so swap appropriately for the lowering case:
+    let dv1, dv2, vTransAtStart, vTransAtArrival;
+
+    if (r1 <= r2){
+      vTransAtStart = vPeri;
+      vTransAtArrival = vApo;
+      dv1 = Math.abs(vTransAtStart - v1);
+      dv2 = Math.abs(v2 - vTransAtArrival);
+    } else {
+      // lowering: start at r1 (apoapsis of transfer), arrive at r2 (periapsis)
+      // Need transfer speed at r1 (apo) and at r2 (peri):
+      const vAtR1 = Math.sqrt(mu * (2/r1 - 1/aT));
+      const vAtR2 = Math.sqrt(mu * (2/r2 - 1/aT));
+      vTransAtStart = vAtR1;
+      vTransAtArrival = vAtR2;
+      dv1 = Math.abs(v1 - vTransAtStart);
+      dv2 = Math.abs(vTransAtArrival - v2);
+    }
+
+    const dvTot = dv1 + dv2;
+
+    // Phase angle requirement (target initial angle so that target arrives at rendezvous point at t=tof)
+    // Spacecraft travels pi radians along transfer from departure line to opposite side.
+    // Target angle evolves as theta_t = theta_t0 + n2*t; set theta_t(tof)=pi.
+    const phaseReq = modTau(Math.PI - n2*tof);
+
+    // Prop estimate (two burns sequential)
+    const b1 = rocketPropUsed(m0, dv1, isp);
+    const b2 = rocketPropUsed(b1.mf, dv2, isp);
+    const propTot = (m0 - b2.mf);
+
+    // Initial angles
+    const thetaSC0 = 0;
+    const thetaT0 = modTau(phase0);
+
+    // Reset sim state
+    state = {
+      body, mu, gSurf,
+      r1, r2, aT, e, n1, n2, nT, tof,
+      dv1, dv2, dvTot,
+      phase0, phaseReq,
+      m0, isp, propTot, mf: b2.mf,
+      timeScale,
+      traceMax,
+      t: 0,
+      phaseAchAtArrival: null,
+      arrived: false,
+      trace: [],
+      // rotation so we can orient visually without changing math
+      thetaSC0, thetaT0,
+    };
+
+    renderOutputs();
+  }
+
+  function renderOutputs(){
+    if (!state) return;
+    const {
+      body, mu, gSurf, r1, r2, tof,
+      dv1, dv2, dvTot,
+      phaseReq, phase0,
+      m0, isp, propTot, mf
+    } = state;
+
+    const km = x => x/1e3;
+    const out =
+`Central body: ${body.name}
+Mass (kg): ${fmt(body.mass,0)}
+Mean radius (km): ${fmt(km(body.radius),1)}
+μ = GM (m^3/s^2): ${fmt(mu,0)}
+Surface gravity (m/s^2): ${fmt(gSurf,3)}
+
+Start orbit radius (km): ${fmt(km(r1),1)}
+Target orbit radius (km): ${fmt(km(r2),1)}
+
+Hohmann TOF (s): ${fmt(tof,2)}   (${fmt(tof/60,2)} min)
+Δv1 (m/s): ${fmt(dv1,3)}
+Δv2 (m/s): ${fmt(dv2,3)}
+Total Δv (m/s): ${fmt(dvTot,3)}
+
+Initial phase angle (deg): ${fmt(rad2deg(modTau(phase0)),2)}
+Required phase angle (deg): ${fmt(rad2deg(modTau(phaseReq)),2)}
+
+Prop estimate (Isp=${fmt(isp,1)} s, m0=${fmt(m0,1)} kg):
+Total prop used (kg): ${fmt(propTot,3)}
+Final mass after burns (kg): ${fmt(mf,3)}
+`;
+    ui.out.textContent = out;
+  }
+
+  function getSpacecraftPos(t){
+    // Returns {x,y,theta,r} in meters, inertial frame
+    const { r1, r2, aT, e, mu, nT } = state;
+    if (t <= 0) {
+      return { x: r1, y: 0, theta: 0, r: r1 };
+    }
+
+    // Transfer portion
+    if (t < state.tof){
+      if (r1 <= r2){
+        // start at periapsis: E=0 at t=0, M=nT*t
+        const M = nT * t;
+        const E = solveKepler_E(M, e);
+        const f = E_to_trueAnomaly(E, e);
+        const r = aT * (1 - e*Math.cos(E));
+        return { x: r*Math.cos(f), y: r*Math.sin(f), theta: f, r };
+      } else {
+        // lowering: start at apoapsis: E=pi at t=0, M=pi
+        const M = Math.PI + nT * t;
+        const E = solveKepler_E(M, e);
+        const f = E_to_trueAnomaly(E, e);
+        const r = aT * (1 - e*Math.cos(E));
+        return { x: r*Math.cos(f), y: r*Math.sin(f), theta: f, r };
+      }
+    }
+
+    // After arrival: circular on target orbit (r2) with angular rate n2
+    const t2 = t - state.tof;
+    const thetaArr = (r1 <= r2) ? Math.PI : Math.PI; // arrival is opposite side either way
+    const theta = thetaArr + state.n2 * t2;
+    return { x: r2*Math.cos(theta), y: r2*Math.sin(theta), theta, r: r2 };
+  }
+
+  function getTargetPos(t){
+    const theta = state.thetaT0 + state.n2 * t;
+    const r = state.r2;
+    return { x: r*Math.cos(theta), y: r*Math.sin(theta), theta, r };
+  }
+
+  function markArrivalIfNeeded(){
+    if (!state.arrived && state.t >= state.tof){
+      state.arrived = true;
+      const thetaTargetAtArrival = modTau(state.thetaT0 + state.n2*state.tof);
+      state.phaseAchAtArrival = thetaTargetAtArrival; // spacecraft arrival is at pi
+      // Update outputs with achieved arrival angle
+      const extra = `\nAchieved target angle at arrival (deg): ${fmt(rad2deg(thetaTargetAtArrival),2)}\nSpacecraft arrival angle is 180.00 deg`;
+      ui.out.textContent = ui.out.textContent + extra;
+    }
+  }
+
+  // ---- Rendering ----
+  function draw(){
+    if (!state) return;
+
+    const W = canvas.clientWidth;
+    const H = canvas.clientHeight;
+    ctx.clearRect(0,0,W,H);
+
+    const cx = W/2, cy = H/2;
+
+    // scale so that max orbit radius fits
+    const rMax = Math.max(state.r1, state.r2) * 1.08;
+    const scale = 0.45 * Math.min(W,H) / rMax;
+
+    function toScreen(p){
+      // rotate frame so spacecraft departure line points right (already), just center and scale.
+      return { sx: cx + p.x*scale, sy: cy - p.y*scale };
+    }
+
+    // Draw central body
+    const bodyR = state.body.radius * scale;
+    ctx.beginPath();
+    ctx.arc(cx, cy, Math.max(4, bodyR), 0, TAU);
+    ctx.fillStyle = "#121a2b";
+    ctx.fill();
+    ctx.strokeStyle = "#2a3a5a";
+    ctx.lineWidth = 1;
+    ctx.stroke();
+
+    // Orbits
+    function drawCircleOrbit(r, stroke){
+      ctx.beginPath();
+      ctx.arc(cx, cy, r*scale, 0, TAU);
+      ctx.strokeStyle = stroke;
+      ctx.lineWidth = 1;
+      ctx.stroke();
+    }
+    drawCircleOrbit(state.r1, "#2b4a7a");
+    drawCircleOrbit(state.r2, "#2b7a4a");
+
+    // Transfer ellipse (draw full ellipse for reference)
+    // We'll parametrize in perifocal frame aligned with +x as periapsis direction.
+    const a = state.aT, e = state.e;
+    const b = a*Math.sqrt(1 - e*e);
+    const cF = a*e;
+
+    ctx.beginPath();
+    const steps = 360;
+    for (let i=0;i<=steps;i++){
+      const t = (i/steps)*TAU;
+      // ellipse centered at (+c,0) in this frame if focus at origin? Actually focus at origin, param:
+      // x = a(cosE - e), y = b sinE with E as eccentric anomaly.
+      const E = t;
+      const x = a*(Math.cos(E) - e);
+      const y = b*Math.sin(E);
+      const p = toScreen({x,y});
+      if (i===0) ctx.moveTo(p.sx,p.sy); else ctx.lineTo(p.sx,p.sy);
+    }
+    ctx.strokeStyle = "#6b4aa6";
+    ctx.lineWidth = 1;
+    ctx.stroke();
+
+    // Trace
+    ctx.beginPath();
+    for (let i=0;i<state.trace.length;i++){
+      const p = toScreen(state.trace[i]);
+      if (i===0) ctx.moveTo(p.sx,p.sy); else ctx.lineTo(p.sx,p.sy);
+    }
+    ctx.strokeStyle = "rgba(240,240,255,0.45)";
+    ctx.lineWidth = 1;
+    ctx.stroke();
+
+    // Bodies positions
+    const sc = getSpacecraftPos(state.t);
+    const tg = getTargetPos(state.t);
+
+    // Draw target
+    const tp = toScreen(tg);
+    ctx.beginPath();
+    ctx.arc(tp.sx, tp.sy, 5, 0, TAU);
+    ctx.fillStyle = "#38d47a";
+    ctx.fill();
+
+    // Draw spacecraft
+    const sp = toScreen(sc);
+    ctx.beginPath();
+    ctx.arc(sp.sx, sp.sy, 5, 0, TAU);
+    ctx.fillStyle = "#e9e9ff";
+    ctx.fill();
+
+    // HUD text
+    ctx.fillStyle = "rgba(231,238,252,0.9)";
+    ctx.font = "12px ui-monospace, Menlo, Consolas, monospace";
+    const tStr = `t = ${fmt(state.t,2)} s`;
+    const phaseNow = modTau(tg.theta - sc.theta);
+    const pStr = `phase (target - sc) = ${fmt(rad2deg(phaseNow),2)} deg`;
+    const modeStr = state.t < state.tof ? "Transfer" : "On target orbit";
+    ctx.fillText(`${tStr} | ${modeStr}`, 14, 18);
+    ctx.fillText(pStr, 14, 34);
+
+    // Arrival marker point (opposite side)
+    const arr = toScreen({ x: state.r2*Math.cos(Math.PI), y: state.r2*Math.sin(Math.PI) });
+    ctx.beginPath();
+    ctx.arc(arr.sx, arr.sy, 3, 0, TAU);
+    ctx.fillStyle = "#ffd166";
+    ctx.fill();
+  }
+
+  function tick(ts){
+    if (!state) return;
+    if (!lastT) lastT = ts;
+    const dtReal = (ts - lastT) / 1000;
+    lastT = ts;
+
+    if (running){
+      const dtSim = dtReal * state.timeScale;
+      state.t += dtSim;
+
+      // add trace point for spacecraft
+      const sc = getSpacecraftPos(state.t);
+      state.trace.push({ x: sc.x, y: sc.y });
+      if (state.trace.length > state.traceMax) state.trace.shift();
+
+      markArrivalIfNeeded();
+    }
+
+    draw();
+    requestAnimationFrame(tick);
+  }
+
+  // ---- Controls ----
+  ui.start.addEventListener("click", () => { running = true; });
+  ui.pause.addEventListener("click", () => { running = false; });
+  ui.reset.addEventListener("click", () => { running = false; recompute(); state.t = 0; state.trace = []; lastT=0; });
+
+  // Recompute on input changes
+  ["body","alt1","alt2","phase0","timeScale","traceN","m0","isp"].forEach(id=>{
+    ui[id].addEventListener("change", () => { const wasRunning = running; running=false; recompute(); state.t=0; state.trace=[]; lastT=0; running=wasRunning; });
+  });
+
+  // Init
+  resize();
+  recompute();
+  requestAnimationFrame(tick);
+})();
+</script>
+</body>
+</html>

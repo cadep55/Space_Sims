@@ -1,0 +1,785 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Interplanetary 2D Hohmann Simulator (Heliocentric)</title>
+  <style>
+    :root { color-scheme: dark; }
+    body { margin:0; font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Arial; background:#070a10; color:#e7eefc; }
+    .wrap { display:grid; grid-template-columns: 430px 1fr; height:100vh; }
+    .panel { padding:14px; border-right:1px solid #1b2536; overflow:auto; background:#0b0f16; }
+    h1 { font-size:16px; margin:0 0 10px; }
+    h2 { font-size:13px; margin:14px 0 8px; color:#cfe0ff; }
+    .row { display:grid; grid-template-columns: 1fr 1fr; gap:10px; margin-bottom:10px; }
+    label { font-size:12px; color:#b7c5e6; display:block; margin-bottom:4px; }
+    input, select, button { width:100%; box-sizing:border-box; padding:8px 10px; border-radius:10px; border:1px solid #22304a; background:#0f1624; color:#e7eefc; }
+    input[type="range"]{ padding:0; height:34px; }
+    button { cursor:pointer; border:1px solid #2a3a5a; background:#16233a; }
+    button:hover { background:#1b2c49; }
+    .btnrow { display:grid; grid-template-columns: 1fr 1fr 1fr; gap:10px; margin:10px 0; }
+    .box { border:1px solid #22304a; border-radius:12px; padding:10px; background:#0f1624; margin-bottom:10px; }
+    .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace; font-size:12px; white-space:pre-wrap; }
+    .hint { font-size:12px; color:#b7c5e6; line-height:1.35; }
+    .small { font-size:11px; color:#aab9dd; }
+    canvas { width:100%; height:100%; display:block; background: radial-gradient(1200px 800px at 55% 45%, #0f1a2c, #05070c); }
+    .warn { color:#ffcc66; }
+  </style>
+</head>
+<body>
+<div class="wrap">
+  <div class="panel">
+    <h1>Heliocentric Interplanetary Hohmann Transfer (2D)</h1>
+
+    <div class="box">
+      <div class="row">
+        <div>
+          <label>Time scale (sim sec / real sec)</label>
+          <input id="timeScale" type="number" value="200000" step="10000" min="1" />
+        </div>
+        <div>
+          <label>Stop after days</label>
+          <input id="maxDays" type="number" value="1200" step="10" min="1" />
+        </div>
+      </div>
+
+      <div class="row">
+        <div>
+          <label>Trace length (points)</label>
+          <input id="traceN" type="number" value="4500" step="250" min="200" />
+        </div>
+        <div>
+          <label>Show planet labels</label>
+          <select id="labels">
+            <option value="on" selected>On</option>
+            <option value="off">Off</option>
+          </select>
+        </div>
+      </div>
+
+      <!-- NEW: zoom + spacing -->
+      <div class="row">
+        <div>
+          <label>Zoom (view only) — wheel also works</label>
+          <input id="zoom" type="range" min="-2" max="2" step="0.01" value="0" />
+        </div>
+        <div>
+          <label>Orbit spacing (view only)</label>
+          <input id="spacing" type="range" min="0.5" max="3" step="0.01" value="1" />
+        </div>
+      </div>
+      <div class="small">Tip: drag the canvas to pan. Zoom/spacing affect drawing only (physics stays in AU).</div>
+
+      <div class="row">
+        <div>
+          <label>Spacecraft wet mass (kg)</label>
+          <input id="m0" type="number" value="1500" step="50" min="1" />
+        </div>
+        <div>
+          <label>Isp (s) for prop estimate</label>
+          <input id="isp" type="number" value="320" step="1" min="1" />
+        </div>
+      </div>
+
+      <div class="btnrow">
+        <button id="btnStart">Start</button>
+        <button id="btnPause">Pause</button>
+        <button id="btnReset">Reset</button>
+      </div>
+
+      <div class="hint">
+        Assumptions: circular coplanar planet orbits, impulsive burns, two-body heliocentric dynamics.
+        No SOI capture/escape, no plane change. This is a patched-conic-style teaching sim.
+      </div>
+    </div>
+
+    <div class="box">
+      <h2>Transfer setup</h2>
+      <div class="row">
+        <div>
+          <label>Start planet</label>
+          <select id="startPlanet"></select>
+        </div>
+        <div>
+          <label>Target planet</label>
+          <select id="targetPlanet"></select>
+        </div>
+      </div>
+
+      <div class="row">
+        <div>
+          <label>Start planet θ₁ at t=0 (deg)</label>
+          <input id="theta1" type="number" value="0" step="5" />
+        </div>
+        <div>
+          <label>Target planet θ₂ at t=0 (deg)</label>
+          <input id="theta2" type="number" value="60" step="5" />
+        </div>
+      </div>
+
+      <div class="row">
+        <div>
+          <label>Auto-phase helper</label>
+          <button id="btnAutoPhase">Set target θ₂ for rendezvous</button>
+        </div>
+        <div>
+          <label>Transfer direction</label>
+          <input id="dir" type="text" value="—" disabled />
+        </div>
+      </div>
+
+      <div class="small">
+        The spacecraft departs immediately at t=0 from θ₁(0), then coasts on the Hohmann transfer ellipse to θ₁(0)+180°
+        at arrival time, then continues on the destination planet’s circular orbit.
+      </div>
+    </div>
+
+    <div class="box">
+      <label>Outputs</label>
+      <div id="out" class="mono"></div>
+      <div id="warn" class="mono warn"></div>
+    </div>
+
+    <div class="box">
+      <h2>Constants (heliocentric)</h2>
+      <div class="mono" id="consts"></div>
+    </div>
+  </div>
+
+  <canvas id="c"></canvas>
+</div>
+
+<script>
+(() => {
+  // ---------- Constants ----------
+  const TAU = Math.PI * 2;
+  const AU  = 149597870700;                 // m
+  const MU_SUN = 1.32712440018e20;          // m^3/s^2
+  const G0 = 9.80665;                       // m/s^2
+
+  // Planet data: semi-major axes (AU), masses (kg). Circular model uses r=a.
+  const planets = [
+    { key:"mercury", name:"Mercury", a_AU:0.387098, mass:3.3011e23, color:"#b9b2a6" },
+    { key:"venus",   name:"Venus",   a_AU:0.723332, mass:4.8675e24, color:"#d8c27a" },
+    { key:"earth",   name:"Earth",   a_AU:1.000000, mass:5.9722e24, color:"#6bb7ff" },
+    { key:"mars",    name:"Mars",    a_AU:1.523679, mass:6.4171e23, color:"#ff7a5c" },
+    { key:"jupiter", name:"Jupiter", a_AU:5.2044,   mass:1.8982e27, color:"#d3a37c" },
+  ];
+
+  const AST_BELT_IN_AU = 2.2;
+  const AST_BELT_OUT_AU = 3.2;
+
+  // ---------- UI ----------
+  const el = id => document.getElementById(id);
+  const canvas = el("c");
+  const ctx = canvas.getContext("2d");
+
+  const ui = {
+    timeScale: el("timeScale"),
+    maxDays: el("maxDays"),
+    traceN: el("traceN"),
+    labels: el("labels"),
+    zoom: el("zoom"),
+    spacing: el("spacing"),
+
+    m0: el("m0"),
+    isp: el("isp"),
+
+    startPlanet: el("startPlanet"),
+    targetPlanet: el("targetPlanet"),
+    theta1: el("theta1"),
+    theta2: el("theta2"),
+    btnAutoPhase: el("btnAutoPhase"),
+    dir: el("dir"),
+
+    out: el("out"),
+    warn: el("warn"),
+    consts: el("consts"),
+
+    start: el("btnStart"),
+    pause: el("btnPause"),
+    reset: el("btnReset"),
+  };
+
+  // Populate planet selects
+  for (const p of planets) {
+    const o1 = document.createElement("option");
+    o1.value = p.key; o1.textContent = p.name;
+    ui.startPlanet.appendChild(o1);
+
+    const o2 = document.createElement("option");
+    o2.value = p.key; o2.textContent = p.name;
+    ui.targetPlanet.appendChild(o2);
+  }
+  ui.startPlanet.value = "earth";
+  ui.targetPlanet.value = "mars";
+
+  // ---------- Helpers ----------
+  const deg2rad = d => d * Math.PI/180;
+  const rad2deg = r => r * 180/Math.PI;
+  const modTau = a => ((a % TAU) + TAU) % TAU;
+
+  function fmt(x, digits=3){
+    if (!isFinite(x)) return "—";
+    const ax = Math.abs(x);
+    if (ax !== 0 && (ax < 1e-3 || ax > 1e7)) return x.toExponential(3);
+    return x.toFixed(digits);
+  }
+
+  function findPlanet(key){
+    const p = planets.find(x => x.key === key);
+    if (!p) throw new Error("Planet not found: " + key);
+    return p;
+  }
+
+  function meanMotion(r){
+    return Math.sqrt(MU_SUN / (r*r*r)); // rad/s
+  }
+
+  function solveKeplerE(M, e){
+    M = modTau(M);
+    let E = (e < 0.8) ? M : Math.PI;
+    for (let i=0;i<30;i++){
+      const f = E - e*Math.sin(E) - M;
+      const fp = 1 - e*Math.cos(E);
+      const dE = -f/fp;
+      E += dE;
+      if (Math.abs(dE) < 1e-12) break;
+    }
+    return E;
+  }
+
+  function EToTrue(E, e){
+    const s = Math.sin(E/2), c = Math.cos(E/2);
+    const num = Math.sqrt(1+e)*s;
+    const den = Math.sqrt(1-e)*c;
+    return 2*Math.atan2(num, den);
+  }
+
+  function trueToE(f, e){
+    const t = Math.tan(f/2);
+    const k = Math.sqrt((1 - e) / (1 + e));
+    return 2 * Math.atan2(k*t, 1);
+  }
+
+  function rot2(x, y, ang){
+    const c = Math.cos(ang), s = Math.sin(ang);
+    return { x: c*x - s*y, y: s*x + c*y };
+  }
+
+  function rocketPropUsed(m0, dv, isp){
+    const mf = m0 * Math.exp(-dv / (isp*G0));
+    return { mf, mprop: m0 - mf };
+  }
+
+  // ---------- Core Hohmann math ----------
+  function hohmann(r1, r2){
+    const aT = (r1 + r2) / 2;
+    const tof = Math.PI * Math.sqrt((aT*aT*aT) / MU_SUN); // seconds
+
+    const v1 = Math.sqrt(MU_SUN / r1);
+    const v2 = Math.sqrt(MU_SUN / r2);
+
+    const vT1 = Math.sqrt(MU_SUN * (2/r1 - 1/aT));
+    const vT2 = Math.sqrt(MU_SUN * (2/r2 - 1/aT));
+
+    const dv1 = Math.abs(vT1 - v1);
+    const dv2 = Math.abs(v2 - vT2);
+    const dvTot = dv1 + dv2;
+
+    const n1 = meanMotion(r1);
+    const n2 = meanMotion(r2);
+
+    // Required initial relative phase phi0 = theta2(0) - theta1(0):
+    // theta2(0) + n2*tof = theta1(0) + pi   (mod 2pi)
+    // => phiReq = pi - n2*tof  (mod 2pi)
+    const phiReq = modTau(Math.PI - n2*tof);
+
+    return { aT, tof, v1, v2, vT1, vT2, dv1, dv2, dvTot, n1, n2, phiReq };
+  }
+
+  // ---------- Simulation state ----------
+  let state = null;
+  let running = false;
+  let lastTS = 0;
+
+  // ---------- View / camera ----------
+  let screen = { cx:0, cy:0, scale:1 };
+  let cam = { panX:0, panY:0, dragging:false, lastX:0, lastY:0 };
+
+  function toScreen(x, y){
+    return { x: screen.cx + x*screen.scale, y: screen.cy - y*screen.scale };
+  }
+
+  // mouse wheel -> zoom slider
+  canvas.addEventListener("wheel", (e) => {
+    e.preventDefault();
+    const z = Number(ui.zoom.value);
+    const delta = (e.deltaY > 0) ? -0.08 : 0.08;
+    ui.zoom.value = Math.max(-2, Math.min(2, z + delta));
+  }, { passive:false });
+
+  // drag to pan
+  canvas.addEventListener("mousedown", (e) => {
+    cam.dragging = true;
+    cam.lastX = e.clientX;
+    cam.lastY = e.clientY;
+  });
+  window.addEventListener("mouseup", () => cam.dragging = false);
+  window.addEventListener("mousemove", (e) => {
+    if (!cam.dragging) return;
+    const dx = e.clientX - cam.lastX;
+    const dy = e.clientY - cam.lastY;
+    cam.lastX = e.clientX;
+    cam.lastY = e.clientY;
+    cam.panX += dx;
+    cam.panY += dy;
+  });
+
+  // ---------- Resize ----------
+  function resize(){
+    const dpr = window.devicePixelRatio || 1;
+    canvas.width = Math.floor(canvas.clientWidth * dpr);
+    canvas.height = Math.floor(canvas.clientHeight * dpr);
+    ctx.setTransform(dpr,0,0,dpr,0,0);
+  }
+  window.addEventListener("resize", resize);
+
+  // ---------- Recompute ----------
+  function recompute(){
+    const p1 = findPlanet(ui.startPlanet.value);
+    const p2 = findPlanet(ui.targetPlanet.value);
+
+    const r1 = p1.a_AU * AU;
+    const r2 = p2.a_AU * AU;
+
+    const theta1_0 = deg2rad(Number(ui.theta1.value) || 0);
+    const theta2_0 = deg2rad(Number(ui.theta2.value) || 0);
+
+    const h = hohmann(r1, r2);
+
+    const dir = (r2 > r1) ? "Inner → Outer" : (r2 < r1) ? "Outer → Inner" : "Same orbit";
+    ui.dir.value = dir;
+
+    // Transfer ellipse parameters (heliocentric)
+    const aT = h.aT;
+    const eT = Math.abs(r2 - r1) / (r2 + r1);
+
+    // Departure at periapsis if going outward; at apoapsis if going inward
+    const depIsPeri = (r2 >= r1);
+    const f_dep = depIsPeri ? 0 : Math.PI;
+
+    // Align transfer ellipse departure radius direction to theta1_0
+    const omegaT = theta1_0 - f_dep;
+
+    // Set transfer M0 so at t=0 it is at f_dep
+    const E0 = trueToE(f_dep, eT);
+    const M0 = modTau(E0 - eT*Math.sin(E0));
+    const nT = Math.sqrt(MU_SUN / (aT*aT*aT));
+
+    // Arrival inertial direction (half orbit)
+    const thetaArr = modTau(theta1_0 + Math.PI);
+
+    // After arrival, spacecraft follows target circular orbit at r2, starting at thetaArr at t=tof
+    const n2 = h.n2;
+
+    const thetaTargetArr = modTau(theta2_0 + n2*h.tof);
+    const missAng = Math.atan2(Math.sin(thetaTargetArr - thetaArr), Math.cos(thetaTargetArr - thetaArr));
+    const missArc = Math.abs(missAng) * r2;
+
+    // Prop estimate
+    const m0 = Math.max(1, Number(ui.m0.value));
+    const isp = Math.max(1, Number(ui.isp.value));
+    const b1 = rocketPropUsed(m0, h.dv1, isp);
+    const b2 = rocketPropUsed(b1.mf, h.dv2, isp);
+
+    const maxDays = Math.max(1, Number(ui.maxDays.value));
+    const stopAfterSec = maxDays * 86400;
+
+    const traceMax = Math.max(200, Math.floor(Number(ui.traceN.value)));
+
+    // Planet initial angles: default 0 for non-selected
+    const planetTheta0 = {};
+    for (const p of planets) planetTheta0[p.key] = 0;
+    planetTheta0[p1.key] = theta1_0;
+    planetTheta0[p2.key] = theta2_0;
+
+    state = {
+      p1, p2,
+      r1, r2,
+      theta1_0, theta2_0,
+      ...h,
+      aT, eT, omegaT, M0, nT, depIsPeri, f_dep,
+      thetaArr,
+      timeScale: Math.max(1, Number(ui.timeScale.value)),
+      stopAfterSec,
+      maxDays,
+      traceMax,
+      t: 0,
+      trace: [],
+      m0, isp, propTot: (m0 - b2.mf), mf: b2.mf,
+      // for trace discontinuity threshold (view units)
+      jumpRef: (findPlanet("jupiter").a_AU * AU),
+      planetTheta0,
+      missAng, missArc,
+    };
+
+    renderOutputs();
+    renderConsts();
+  }
+
+  function renderConsts(){
+    const lines = [];
+    lines.push(`μ_sun (m^3/s^2): ${fmt(MU_SUN,0)}`);
+    lines.push(`AU (m): ${fmt(AU,0)}`);
+    lines.push(`Asteroid belt: ${AST_BELT_IN_AU}–${AST_BELT_OUT_AU} AU`);
+    lines.push("");
+    for (const p of planets){
+      lines.push(`${p.name.padEnd(8)}  a=${fmt(p.a_AU,6)} AU  mass=${fmt(p.mass,3)} kg`);
+    }
+    ui.consts.textContent = lines.join("\n");
+  }
+
+  function renderOutputs(){
+    if (!state) return;
+
+    const phi0 = modTau(state.theta2_0 - state.theta1_0);
+    const phi0_signed = Math.atan2(Math.sin(phi0), Math.cos(phi0));
+    const phiReq_signed = Math.atan2(Math.sin(state.phiReq), Math.cos(state.phiReq));
+
+    const warn = [];
+    if (ui.startPlanet.value === ui.targetPlanet.value){
+      warn.push("Start and target are the same planet: choose different planets.");
+    }
+    const missDeg = Math.abs(rad2deg(state.missAng));
+    if (missDeg > 10){
+      warn.push(`Large phase mismatch: miss at arrival ~${fmt(missDeg,1)} deg (use Auto-phase).`);
+    }
+    ui.warn.textContent = warn.length ? ("⚠ " + warn.join("\n⚠ ")) : "";
+
+    ui.out.textContent =
+`Start: ${state.p1.name}  (r1=${fmt(state.r1/AU,6)} AU)
+Target: ${state.p2.name} (r2=${fmt(state.r2/AU,6)} AU)
+
+Hohmann transfer:
+  a_transfer (AU): ${fmt(state.aT/AU,6)}
+  e_transfer: ${fmt(state.eT,6)}
+  TOF (days): ${fmt(state.tof/86400,3)}  (${fmt(state.tof/3600,3)} hr)
+
+Δv:
+  Δv1 (m/s): ${fmt(state.dv1,3)}
+  Δv2 (m/s): ${fmt(state.dv2,3)}
+  Total (m/s): ${fmt(state.dvTot,3)}
+
+Phasing (t=0):
+  Current φ0 = θ2-θ1 (deg): ${fmt(rad2deg(phi0_signed),2)}
+  Required φ0 (deg):        ${fmt(rad2deg(phiReq_signed),2)}
+  (positive means target leads start)
+
+Arrival miss (if not phased):
+  angular miss at TOF (deg): ${fmt(missDeg,3)}
+  miss arc-length approx (km): ${fmt(state.missArc/1000,3)}
+
+Prop estimate (Isp=${fmt(state.isp,1)} s, m0=${fmt(state.m0,1)} kg):
+  prop used (kg): ${fmt(state.propTot,3)}
+  final mass (kg): ${fmt(state.mf,3)}
+
+Stop:
+  stop after (days): ${fmt(state.maxDays,2)}
+`;
+  }
+
+  // ---------- "Physics" positions (AU-based) + VIEW spacing ----------
+  function spacingFactor(){ return Number(ui.spacing.value); }
+  function zoomFactor(){ return Math.pow(2, Number(ui.zoom.value)); }
+
+  function planetPos(pKey, t){
+    const p = findPlanet(pKey);
+    const rPhys = p.a_AU * AU;
+    const n = meanMotion(rPhys);
+
+    const theta0 = state.planetTheta0[pKey] ?? 0;
+    const th = theta0 + n*t;
+
+    // View-only spacing
+    const rDraw = rPhys * spacingFactor();
+
+    return { x: rDraw*Math.cos(th), y: rDraw*Math.sin(th), th, n, planet: p, rPhys };
+  }
+
+  function transferPos(t){
+    const M = state.M0 + state.nT*t;
+    const E = solveKeplerE(M, state.eT);
+    const f = EToTrue(E, state.eT);
+    const rPhys = state.aT * (1 - state.eT*Math.cos(E));
+
+    // View-only spacing
+    const rDraw = rPhys * spacingFactor();
+
+    const xp = rDraw*Math.cos(f);
+    const yp = rDraw*Math.sin(f);
+    const pos = rot2(xp, yp, state.omegaT);
+    const th = Math.atan2(pos.y, pos.x);
+
+    return { x: pos.x, y: pos.y, th, rPhys };
+  }
+
+  function spacecraftPos(t){
+    if (t <= state.tof) return transferPos(t);
+
+    const dt = t - state.tof;
+    const th = state.thetaArr + state.n2*dt;
+
+    const rPhys = state.r2;
+    const rDraw = rPhys * spacingFactor();
+    return { x: rDraw*Math.cos(th), y: rDraw*Math.sin(th), th, rPhys };
+  }
+
+  // ---------- Drawing ----------
+  function drawOrbitCircle(rDraw, color, lineW=1, alpha=1){
+    const steps = 420;
+    ctx.globalAlpha = alpha;
+    ctx.beginPath();
+    for (let i=0;i<=steps;i++){
+      const th = (i/steps)*TAU;
+      const x = rDraw*Math.cos(th);
+      const y = rDraw*Math.sin(th);
+      const s = toScreen(x,y);
+      if (i===0) ctx.moveTo(s.x,s.y);
+      else ctx.lineTo(s.x,s.y);
+    }
+    ctx.strokeStyle = color;
+    ctx.lineWidth = lineW;
+    ctx.stroke();
+    ctx.globalAlpha = 1;
+  }
+
+  function drawAsteroidBelt(){
+    const rIn = AST_BELT_IN_AU * AU * spacingFactor();
+    const rOut = AST_BELT_OUT_AU * AU * spacingFactor();
+    const bands = 10;
+    for (let i=0;i<bands;i++){
+      const r = rIn + (i/(bands-1))*(rOut - rIn);
+      drawOrbitCircle(r, "#d6d1b3", 1, 0.06);
+    }
+  }
+
+  function drawTransferOrbit(){
+    const steps = 520;
+    ctx.beginPath();
+    for (let i=0;i<=steps;i++){
+      const M = (i/steps)*TAU;
+      const E = solveKeplerE(M, state.eT);
+      const f = EToTrue(E, state.eT);
+      const rPhys = state.aT * (1 - state.eT*Math.cos(E));
+      const rDraw = rPhys * spacingFactor();
+      const xp = rDraw*Math.cos(f);
+      const yp = rDraw*Math.sin(f);
+      const pos = rot2(xp, yp, state.omegaT);
+      const s = toScreen(pos.x, pos.y);
+      if (i===0) ctx.moveTo(s.x,s.y);
+      else ctx.lineTo(s.x,s.y);
+    }
+    ctx.strokeStyle = "rgba(200,170,255,0.55)";
+    ctx.lineWidth = 1;
+    ctx.stroke();
+  }
+
+  function draw(){
+    if (!state) return;
+
+    const W = canvas.clientWidth;
+    const H = canvas.clientHeight;
+
+    ctx.clearRect(0,0,W,H);
+
+    // Camera center includes pan
+    screen.cx = W/2 + cam.panX;
+    screen.cy = H/2 + cam.panY;
+
+    // Base scale fits Jupiter, then apply zoom + spacing (view only)
+    const maxRPhys = findPlanet("jupiter").a_AU * AU;
+    const maxRDraw = maxRPhys * spacingFactor();
+    const baseScale = 0.45 * Math.min(W,H) / (maxRDraw * 1.12);
+
+    screen.scale = baseScale * zoomFactor();
+
+    // Sun
+    const sun = toScreen(0,0);
+    ctx.beginPath();
+    ctx.arc(sun.x, sun.y, 7, 0, TAU);
+    ctx.fillStyle = "#ffd166";
+    ctx.fill();
+    ctx.strokeStyle = "rgba(255,209,102,0.45)";
+    ctx.lineWidth = 2;
+    ctx.stroke();
+
+    // Orbit rings
+    for (const p of planets){
+      const rDraw = p.a_AU * AU * spacingFactor();
+      drawOrbitCircle(rDraw, "#2a3a5a", 1, 0.35);
+    }
+    drawAsteroidBelt();
+
+    if (state.p1.key !== state.p2.key) drawTransferOrbit();
+
+    // Trace with breaks
+    if (state.trace.length > 1){
+      ctx.beginPath();
+      let started = false;
+      for (let i=0;i<state.trace.length;i++){
+        const pt = state.trace[i];
+        if (pt === null){ started = false; continue; }
+        const s = toScreen(pt.x, pt.y);
+        if (!started){ ctx.moveTo(s.x, s.y); started = true; }
+        else ctx.lineTo(s.x, s.y);
+      }
+      ctx.strokeStyle = "rgba(240,240,255,0.45)";
+      ctx.lineWidth = 1;
+      ctx.stroke();
+    }
+
+    // Planets
+    for (const p of planets){
+      const pos = planetPos(p.key, state.t);
+      const s = toScreen(pos.x, pos.y);
+
+      ctx.beginPath();
+      ctx.arc(s.x, s.y, (p.key==="jupiter")?6:4, 0, TAU);
+      ctx.fillStyle = p.color;
+      ctx.fill();
+
+      if (ui.labels.value === "on"){
+        ctx.fillStyle = "rgba(231,238,252,0.85)";
+        ctx.font = "11px ui-monospace, Menlo, Consolas, monospace";
+        ctx.fillText(p.name, s.x + 8, s.y - 8);
+      }
+    }
+
+    // Spacecraft
+    const sc = spacecraftPos(state.t);
+    const sp = toScreen(sc.x, sc.y);
+    ctx.beginPath();
+    ctx.arc(sp.x, sp.y, 5, 0, TAU);
+    ctx.fillStyle = "#e9e9ff";
+    ctx.fill();
+
+    // Departure marker (start planet at t=0)
+    const dep = planetPos(state.p1.key, 0);
+    const dp = toScreen(dep.x, dep.y);
+    ctx.beginPath();
+    ctx.arc(dp.x, dp.y, 4, 0, TAU);
+    ctx.fillStyle = "#9cffc6";
+    ctx.fill();
+
+    // Arrival marker (transfer arrival at t=tof)
+    const arr = transferPos(state.tof);
+    const ap = toScreen(arr.x, arr.y);
+    ctx.beginPath();
+    ctx.arc(ap.x, ap.y, 4, 0, TAU);
+    ctx.fillStyle = "#ff6b6b";
+    ctx.fill();
+
+    // HUD
+    ctx.fillStyle = "rgba(231,238,252,0.9)";
+    ctx.font = "12px ui-monospace, Menlo, Consolas, monospace";
+    const mode = (state.t <= state.tof) ? "Transfer" : "On target orbit";
+    const tDays = state.t / 86400;
+    ctx.fillText(`t=${fmt(tDays,3)} days | ${mode}`, 14, 18);
+
+    const p1now = planetPos(state.p1.key, state.t);
+    const p2now = planetPos(state.p2.key, state.t);
+    const phiNow = Math.atan2(Math.sin(p2now.th - p1now.th), Math.cos(p2now.th - p1now.th));
+    ctx.fillText(`phase(target-start)=${fmt(rad2deg(phiNow),2)} deg`, 14, 34);
+
+    ctx.fillText(`zoom=${fmt(zoomFactor(),2)}x  spacing=${fmt(spacingFactor(),2)}x  (drag to pan)`, 14, 50);
+  }
+
+  // ---------- Tick ----------
+  function tick(ts){
+    if (!state) return;
+    if (!lastTS) lastTS = ts;
+    const dtReal = (ts - lastTS)/1000;
+    lastTS = ts;
+
+    if (running){
+      const dtSim = dtReal * state.timeScale;
+      state.t += dtSim;
+
+      const sc = spacecraftPos(state.t);
+
+      // Trace point with jump-break
+      const last = state.trace.length ? state.trace[state.trace.length - 1] : null;
+      if (last && last !== null){
+        const dist = Math.hypot(sc.x - last.x, sc.y - last.y);
+        // threshold scales with drawn max radius
+        const jumpThresh = 0.2 * (state.jumpRef * spacingFactor());
+        if (dist > jumpThresh) state.trace.push(null);
+      }
+      state.trace.push({ x: sc.x, y: sc.y });
+      while (state.trace.length > state.traceMax) state.trace.shift();
+
+      if (state.t >= state.stopAfterSec) running = false;
+    }
+
+    draw();
+    requestAnimationFrame(tick);
+  }
+
+  // ---------- Auto-phase ----------
+  ui.btnAutoPhase.addEventListener("click", () => {
+    if (!state) recompute();
+
+    // Set theta2_0 = theta1_0 + phiReq
+    const theta1_0 = deg2rad(Number(ui.theta1.value) || 0);
+    const theta2_req = theta1_0 + state.phiReq;
+    ui.theta2.value = fmt(rad2deg(modTau(theta2_req)), 3);
+
+    const wasRunning = running;
+    running = false;
+    recompute();
+    state.t = 0;
+    state.trace = [];
+    lastTS = 0;
+    running = wasRunning;
+  });
+
+  // ---------- Controls ----------
+  ui.start.addEventListener("click", () => { running = true; });
+  ui.pause.addEventListener("click", () => { running = false; });
+  ui.reset.addEventListener("click", () => {
+    running = false;
+    recompute();
+    state.t = 0;
+    state.trace = [];
+    lastTS = 0;
+  });
+
+  // Recompute on change
+  [
+    "timeScale","maxDays","traceN","labels","zoom","spacing","m0","isp",
+    "startPlanet","targetPlanet","theta1","theta2"
+  ].forEach(id => {
+    ui[id].addEventListener("change", () => {
+      const wasRunning = running;
+      running = false;
+      recompute();
+      state.t = 0;
+      state.trace = [];
+      lastTS = 0;
+      running = wasRunning;
+    });
+  });
+
+  // ---------- Init ----------
+  function init(){
+    resize();
+    recompute();
+    requestAnimationFrame(tick);
+  }
+
+  init();
+})();
+</script>
+</body>
+</html>
