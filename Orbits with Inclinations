@@ -1,0 +1,247 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>3D Planet Orbit Viewer (Inclination)</title>
+  <style>
+    html, body { margin: 0; height: 100%; overflow: hidden; background: #0b0f18; }
+    #ui {
+      position: absolute; top: 12px; left: 12px; z-index: 2;
+      background: rgba(0,0,0,0.55); color: #fff;
+      padding: 10px 12px; border-radius: 10px;
+      font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif;
+      width: 280px;
+    }
+    #ui label { display: block; font-size: 12px; opacity: 0.9; margin-top: 8px; }
+    #ui input[type="range"] { width: 100%; }
+    #ui .row { display: flex; justify-content: space-between; font-size: 12px; opacity: 0.9; }
+    canvas { display: block; }
+  </style>
+
+  <!-- Import maps polyfill (helps on some browsers / older setups) -->
+  <script async src="https://unpkg.com/es-module-shims@1.10.0/dist/es-module-shims.js"></script>
+
+  <!-- Import map: lets OrbitControls resolve `import ... from "three"` -->
+  <script type="importmap">
+  {
+    "imports": {
+      "three": "https://unpkg.com/three@0.161.0/build/three.module.js",
+      "three/addons/": "https://unpkg.com/three@0.161.0/examples/jsm/"
+    }
+  }
+  </script>
+</head>
+
+<body>
+  <div id="ui">
+    <div class="row"><div><b>Planet-centered 3D Orbit</b></div><div id="fps"></div></div>
+
+    <label>Inclination i (deg): <span id="iVal">25</span></label>
+    <input id="i" type="range" min="0" max="180" step="0.1" value="25" />
+
+    <label>RAAN Ω (deg): <span id="raanVal">40</span></label>
+    <input id="raan" type="range" min="0" max="360" step="0.1" value="40" />
+
+    <label>Eccentricity e: <span id="eVal">0.2</span></label>
+    <input id="e" type="range" min="0" max="0.8" step="0.01" value="0.2" />
+
+    <label>Semi-major axis a (scene units): <span id="aVal">10</span></label>
+    <input id="a" type="range" min="4" max="22" step="0.1" value="10" />
+
+    <label>Speed (anomaly rate): <span id="spdVal">0.6</span></label>
+    <input id="spd" type="range" min="0" max="2" step="0.01" value="0.6" />
+
+    <label style="margin-top:10px;">
+      <input id="showPlane" type="checkbox" checked />
+      Show equatorial reference ring
+    </label>
+  </div>
+
+  <script type="module">
+    import * as THREE from "three";
+    import { OrbitControls } from "three/addons/controls/OrbitControls.js";
+
+    // ---------- Scene setup ----------
+    const scene = new THREE.Scene();
+    scene.fog = new THREE.Fog(0x0b0f18, 50, 140);
+
+    const camera = new THREE.PerspectiveCamera(55, innerWidth / innerHeight, 0.1, 500);
+    camera.position.set(22, 14, 22);
+
+    const renderer = new THREE.WebGLRenderer({ antialias: true });
+    renderer.setSize(innerWidth, innerHeight);
+    renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+    document.body.appendChild(renderer.domElement);
+
+    const controls = new OrbitControls(camera, renderer.domElement);
+    controls.enableDamping = true;
+    controls.target.set(0, 0, 0);
+
+    // Lights
+    scene.add(new THREE.AmbientLight(0xffffff, 0.45));
+    const key = new THREE.DirectionalLight(0xffffff, 1.0);
+    key.position.set(20, 30, 10);
+    scene.add(key);
+
+    // ---------- Planet ----------
+    const planetGeo = new THREE.SphereGeometry(3, 48, 32);
+    const planetMat = new THREE.MeshStandardMaterial({
+      color: 0x2d6cdf,
+      roughness: 0.8,
+      metalness: 0.0
+    });
+    const planet = new THREE.Mesh(planetGeo, planetMat);
+    scene.add(planet);
+
+    // Equatorial reference ring (XY plane)
+    const ringGeo = new THREE.RingGeometry(8.5, 9.0, 128);
+    const ringMat = new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.18, side: THREE.DoubleSide });
+    const ring = new THREE.Mesh(ringGeo, ringMat);
+    ring.rotation.x = Math.PI / 2; // ring geometry is in XY; rotate so it's in XZ? We'll instead make it a "belt" visually:
+    // Better: keep as a "belt" around planet in XY plane, so DON'T rotate. Comment line above if you want true XY.
+    ring.rotation.x = 0;
+    scene.add(ring);
+
+    // ---------- Orbit line + spacecraft marker ----------
+    const orbitLineMat = new THREE.LineBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.9 });
+    let orbitLine = null;
+
+    const craft = new THREE.Mesh(
+      new THREE.SphereGeometry(0.22, 16, 12),
+      new THREE.MeshBasicMaterial({ color: 0xffd54a })
+    );
+    scene.add(craft);
+
+    // ---------- UI ----------
+    const ui = {
+      i: document.getElementById("i"),
+      raan: document.getElementById("raan"),
+      e: document.getElementById("e"),
+      a: document.getElementById("a"),
+      spd: document.getElementById("spd"),
+      iVal: document.getElementById("iVal"),
+      raanVal: document.getElementById("raanVal"),
+      eVal: document.getElementById("eVal"),
+      aVal: document.getElementById("aVal"),
+      spdVal: document.getElementById("spdVal"),
+      showPlane: document.getElementById("showPlane"),
+      fps: document.getElementById("fps")
+    };
+
+    function deg2rad(d) { return d * Math.PI / 180; }
+
+    // Rotation matrices applied as: r_eci = Rz(Ω) * Rx(i) * Rz(ω) * r_pf
+    // We'll fix ω=0 for now (argument of periapsis) since you asked "just inclination" / planetary.
+    function rotateOrbitPoint(x, y, iRad, raanRad) {
+      // Start in perifocal plane: [x, y, 0]
+      const z = 0;
+
+      // Rz(raan)
+      const cz = Math.cos(raanRad), sz = Math.sin(raanRad);
+      let x1 = cz * x - sz * y;
+      let y1 = sz * x + cz * y;
+      let z1 = z;
+
+      // Rx(i)
+      const cx = Math.cos(iRad), sx = Math.sin(iRad);
+      let x2 = x1;
+      let y2 = cx * y1 - sx * z1;
+      let z2 = sx * y1 + cx * z1;
+
+      return new THREE.Vector3(x2, y2, z2);
+    }
+
+    function buildOrbitPolyline(a, e, iDeg, raanDeg, segments = 256) {
+      const iRad = deg2rad(iDeg);
+      const raanRad = deg2rad(raanDeg);
+
+      // p = a(1-e^2)
+      const p = a * (1 - e * e);
+
+      const pts = [];
+      for (let k = 0; k <= segments; k++) {
+        const nu = (k / segments) * Math.PI * 2;
+        const r = p / (1 + e * Math.cos(nu));
+        const x = r * Math.cos(nu);
+        const y = r * Math.sin(nu);
+        pts.push(rotateOrbitPoint(x, y, iRad, raanRad));
+      }
+
+      const geo = new THREE.BufferGeometry().setFromPoints(pts);
+      return new THREE.Line(geo, orbitLineMat);
+    }
+
+    function rebuildOrbit() {
+      const a = parseFloat(ui.a.value);
+      const e = parseFloat(ui.e.value);
+      const iDeg = parseFloat(ui.i.value);
+      const raanDeg = parseFloat(ui.raan.value);
+
+      ui.iVal.textContent = iDeg.toFixed(1);
+      ui.raanVal.textContent = raanDeg.toFixed(1);
+      ui.eVal.textContent = e.toFixed(2);
+      ui.aVal.textContent = a.toFixed(1);
+      ui.spdVal.textContent = parseFloat(ui.spd.value).toFixed(2);
+
+      if (orbitLine) scene.remove(orbitLine);
+      orbitLine = buildOrbitPolyline(a, e, iDeg, raanDeg);
+      scene.add(orbitLine);
+    }
+
+    ui.i.addEventListener("input", rebuildOrbit);
+    ui.raan.addEventListener("input", rebuildOrbit);
+    ui.e.addEventListener("input", rebuildOrbit);
+    ui.a.addEventListener("input", rebuildOrbit);
+    ui.showPlane.addEventListener("change", () => ring.visible = ui.showPlane.checked);
+
+    rebuildOrbit();
+
+    // ---------- Animate spacecraft along orbit ----------
+    let nu = 0;
+    let lastT = performance.now();
+    let fpsAcc = 0, fpsN = 0, fpsLast = performance.now();
+
+    function animate(t) {
+      requestAnimationFrame(animate);
+      const dt = Math.min((t - lastT) / 1000, 0.05);
+      lastT = t;
+
+      controls.update();
+
+      const a = parseFloat(ui.a.value);
+      const e = parseFloat(ui.e.value);
+      const iRad = deg2rad(parseFloat(ui.i.value));
+      const raanRad = deg2rad(parseFloat(ui.raan.value));
+      const spd = parseFloat(ui.spd.value);
+
+      const p = a * (1 - e * e);
+
+      nu = (nu + spd * dt) % (Math.PI * 2);
+
+      const r = p / (1 + e * Math.cos(nu));
+      const x = r * Math.cos(nu);
+      const y = r * Math.sin(nu);
+
+      craft.position.copy(rotateOrbitPoint(x, y, iRad, raanRad));
+
+      renderer.render(scene, camera);
+
+      // FPS display (lightweight)
+      fpsAcc += 1 / dt; fpsN++;
+      if (t - fpsLast > 500) {
+        ui.fps.textContent = `${Math.round(fpsAcc / fpsN)} fps`;
+        fpsAcc = 0; fpsN = 0; fpsLast = t;
+      }
+    }
+    animate(performance.now());
+
+    // ---------- Resize ----------
+    addEventListener("resize", () => {
+      camera.aspect = innerWidth / innerHeight;
+      camera.updateProjectionMatrix();
+      renderer.setSize(innerWidth, innerHeight);
+    });
+  </script>
+</body>
+</html>
