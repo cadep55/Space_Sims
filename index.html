@@ -9,14 +9,14 @@
     body {
       font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif;
       margin: 40px;
-      max-width: 900px;
+      max-width: 960px;
       line-height: 1.6;
       color: #1a1a1a;
     }
 
-    h1 {
-      margin-bottom: 0.2em;
-    }
+    h1 { margin-bottom: 0.2em; }
+    h2 { margin-top: 2.2em; }
+    h3 { margin-top: 1.6em; }
 
     .byline {
       font-size: 0.9em;
@@ -29,21 +29,29 @@
       font-size: 1.05em;
     }
 
-    h2 {
-      margin-top: 2em;
-    }
-
-    ul {
-      margin-left: 1.2em;
-    }
+    ul { margin-left: 1.2em; }
+    li { margin-bottom: 0.4em; }
 
     a {
       color: #0a66c2;
       text-decoration: none;
     }
+    a:hover { text-decoration: underline; }
 
-    a:hover {
-      text-decoration: underline;
+    .note {
+      background: #f5f7fa;
+      border-left: 4px solid #0a66c2;
+      padding: 12px 14px;
+      margin: 16px 0;
+      font-size: 0.95em;
+    }
+
+    .warning {
+      background: #fff6e5;
+      border-left: 4px solid #d48806;
+      padding: 12px 14px;
+      margin: 16px 0;
+      font-size: 0.95em;
     }
 
     .footer {
@@ -80,8 +88,8 @@
 
     <p>
       These simulations are intentionally <strong>2D</strong> and currently do not consider
-      orbital inclination or plane changes. Expanding these models into higher-fidelity
-      representations while keeping them intuitive is a future goal.
+      orbital inclination, plane changes, or full multi-body dynamics. Expanding these models
+      while keeping them intuitive is a future goal.
     </p>
 
     <p>
@@ -91,14 +99,10 @@
         orbital-mechanics.space
       </a>.
     </p>
-
-    <p>
-      Check out the simulations below, test the math, and feel free to reach out with ideas,
-      improvements, or bug fixes you’d like to see next.
-    </p>
   </div>
 
   <h2>Live Simulations</h2>
+
   <ul>
     <li>
       <a href="orbit_interplanetary_sim.html">
@@ -112,9 +116,90 @@
     </li>
   </ul>
 
+  <h2>How to Use the Simulations</h2>
+
+  <h3>1) Select the Orbits or Planets</h3>
+  <ul>
+    <li>
+      In the <strong>single-body rendezvous model</strong>, choose the initial and target
+      orbits (defined by periapsis and apoapsis).
+    </li>
+    <li>
+      In the <strong>interplanetary model</strong>, select a starting planet and a target planet.
+      The heliocentric model currently includes planets from <strong>Mercury through Jupiter</strong>,
+      with a visual band representing the asteroid belt.
+    </li>
+  </ul>
+
+  <h3>2) Set the Initial Phase Angles</h3>
+  <ul>
+    <li>
+      Phase angle defines where each orbiting body is at simulation start.
+    </li>
+    <li>
+      Changing the phase does <em>not</em> change orbit shape — only the timing and geometry
+      of the transfer.
+    </li>
+  </ul>
+
+  <h3>3) Use Auto-Rendezvous (Highly Recommended)</h3>
+  <div class="note">
+    <strong>Auto-Rendezvous</strong> computes the correct initial phase angle so that the
+    spacecraft arrives at the target orbit or planet at the same time and location.
+  </div>
+  <ul>
+    <li>
+      This function adjusts <em>only timing</em>, not orbit geometry.
+    </li>
+    <li>
+      If Auto-Rendezvous is not used, the spacecraft will still perform the transfer but may
+      visibly miss the target.
+    </li>
+    <li>
+      This highlights a key real-world concept: correct ΔV alone does not guarantee rendezvous —
+      <strong>phasing matters</strong>.
+    </li>
+  </ul>
+
+  <h3>4) Recommended Transfers</h3>
+  <div class="warning">
+    For best results, try transferring from <strong>periapsis to apoapsis</strong> or
+    <strong>apoapsis to periapsis</strong>. These configurations align naturally with
+    Hohmann transfer geometry.
+  </div>
+
+  <h3>5) Interpreting the Output Data</h3>
+  <ul>
+    <li>
+      The bottom data panel reports <strong>ΔV for each burn</strong> and the
+      <strong>total ΔV</strong>.
+    </li>
+    <li>
+      Total ΔV is driven purely by orbital mechanics — spacecraft mass does not change ΔV,
+      but <em>does</em> affect propellant usage via the rocket equation.
+    </li>
+    <li>
+      Time of flight is shown in days and is fixed for a Hohmann transfer between the selected orbits.
+    </li>
+  </ul>
+
+  <h3>6) Controlling Time and Visualization</h3>
+  <ul>
+    <li>
+      Increase the <strong>time scale</strong> to speed up the simulation.
+    </li>
+    <li>
+      Use <strong>zoom, orbit spacing, and pan</strong> controls to better visualize the solar system.
+    </li>
+    <li>
+      The spacecraft trace shows the path over time and intentionally breaks if a jump would
+      occur due to transfer completion.
+    </li>
+  </ul>
+
   <h2>Source Code</h2>
   <p>
-    For those interested in exploring or contributing to the code, the models are hosted
+    For those interested in reviewing or contributing to the code, the models are hosted
     publicly on GitHub:
   </p>
   <p>
@@ -124,7 +209,8 @@
   </p>
 
   <div class="footer">
-    Built with vanilla HTML, CSS, and JavaScript. No frameworks — just physics, math, and curiosity.
+    Built with vanilla HTML, CSS, and JavaScript — focused on clarity, physics intuition,
+    and fast experimentation.
   </div>
 
 </body>
